@@ -86,8 +86,22 @@ The agent has access to:
 ### Prerequisites
 
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Docker + Docker Compose
 - OpenAI API key
+
+#### Install uv
+
+**macOS**
+```bash
+brew install uv
+```
+
+**Linux** (Nirvana Cloud VMs and other Linux environments)
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env  # or restart your shell
+```
 
 ### 1. Clone and configure
 
@@ -107,7 +121,9 @@ docker compose up -d qdrant
 ### 3. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
 ### 4. Ingest the knowledge base

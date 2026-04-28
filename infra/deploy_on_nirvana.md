@@ -57,9 +57,14 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-## Step 4: Clone the Repository
+## Step 4: Install uv and Clone the Repository
 
 ```bash
+# Install uv (fast Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+# Clone the repo
 git clone https://github.com/nirvana-labs-examples/langchain-support-agent-demo.git
 cd langchain-support-agent-demo
 cp .env.example .env
@@ -89,7 +94,9 @@ This directs Qdrant to write its HNSW index directly to the NVMe volume.
 docker compose up -d qdrant
 
 # Install Python dependencies
-pip install -r requirements.txt
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 
 # Ingest the knowledge base
 python -m app.ingest --recreate
