@@ -1,0 +1,21 @@
+ticket_id,date,customer_tier,subject,description,status,resolution
+T-001,2024-11-01,Pro,Cannot log in after password reset,Customer reset password but login still fails with invalid credentials,resolved,Asked customer to clear cache and try incognito. Issue resolved.
+T-002,2024-11-02,Enterprise,VM stuck in pending for 20 minutes,Launched a gpu-large instance; still pending after 20 mins,resolved,GPU capacity was temporarily exhausted in us-east-1. VM launched after manual intervention.
+T-003,2024-11-03,Free,Confused about billing date,Customer asked when they will be charged for the next cycle,resolved,Explained billing anniversary date via email.
+T-004,2024-11-04,Pro,SSH connection refused,Port 22 not accessible after VM restart,resolved,Firewall rule for port 22 was missing. Added rule via dashboard.
+T-005,2024-11-05,Enterprise,Requesting prorated refund for unused months,Enterprise annual customer wants to cancel and get a refund,open,Referred to billing team per enterprise refund policy.
+T-006,2024-11-06,Pro,Volume not mounting after reboot,/dev/vdb disappears after VM reboot,resolved,Added persistent mount entry to /etc/fstab.
+T-007,2024-11-07,Free,Account locked after too many login attempts,Customer locked out after 5 failed login attempts,resolved,Unlocked account and reset password.
+T-008,2024-11-08,Business,High network latency between VMs,Latency between two VMs in same region is 40ms (expected <5ms),open,Investigating. VMs may be on different physical hosts. Considering live migration.
+T-009,2024-11-09,Enterprise,GPU instance shows lower VRAM than expected,gpu-small shows 14.5GB VRAM instead of 16GB,resolved,1.5GB is reserved for ECC memory. Updated documentation to clarify.
+T-010,2024-11-10,Pro,Cannot log in - account shows suspended,Customer payment failed causing account suspension,resolved,Customer updated payment method. Account reactivated.
+T-011,2024-11-11,Free,VM paused unexpectedly,Free tier VM paused after 30 days of inactivity,resolved,Explained free tier inactivity policy. Customer upgraded to Pro.
+T-012,2024-11-12,Pro,SSH key rejected on new VM,Added SSH key after VM was created; key not working,resolved,Explained that SSH keys must be added before VM creation. Guided through VM recreation.
+T-013,2024-11-13,Business,Snapshot restore failed,Restoring snapshot results in restore failed error,open,Engineering investigating. Likely disk corruption in snapshot.
+T-014,2024-11-14,Enterprise,Requesting escalation for repeated login issues,Third time this month customer cannot log in to the dashboard,escalated,Escalated to Tier 4. Root cause: SSO misconfiguration on customer IdP.
+T-015,2024-11-15,Pro,Outbound data transfer charges unexpectedly high,Bill is 3x higher than expected due to data transfer fees,resolved,Customer had a misconfigured backup job transferring 2TB/day. Fixed job configuration.
+T-016,2024-11-16,Free,Cannot add payment method,Credit card form throws an error on submit,open,Investigating payment processor integration. Workaround: try a different browser.
+T-017,2024-11-17,Pro,Cannot log in - MFA device lost,Customer lost phone with MFA app installed,resolved,Verified identity via backup codes. Disabled MFA; customer re-enrolled on new device.
+T-018,2024-11-18,Enterprise,Need invoice for annual subscription,Customer accounting team needs PDF invoice for annual payment,resolved,Downloaded and sent invoice from billing dashboard.
+T-019,2024-11-19,Business,VM resize failed - instance type unavailable,Tried to resize to gpu-medium; option is greyed out in dashboard,resolved,gpu-medium temporarily out of stock in eu-west-1. Customer switched to us-east-1.
+T-020,2024-11-20,Pro,Cannot log in after email change,Changed account email; now login with new email fails,resolved,Auth cache issue. Cleared session tokens. Customer can now log in with new email.
