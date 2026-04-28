@@ -8,9 +8,6 @@ venv/
 dist/
 build/
 
-# Environment
-.env
-
 # Qdrant local storage (when running without Docker volume)
 qdrant_storage/
 
