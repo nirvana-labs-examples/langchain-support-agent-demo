@@ -3,11 +3,11 @@ Benchmark: retrieval latency (p50 / p95 / p99).
 
 Fires N retrieval queries against the live Qdrant collection and measures
 end-to-end latency including:
-  - Query embedding (OpenAI API call, ~100-200ms at this scale)
-  - Qdrant HNSW similarity search + disk reads (<3ms on NVMe)
+  - Query embedding (local sentence-transformers on CPU, ~25-50ms)
+  - Qdrant HNSW similarity search + disk reads (~2-5ms on NVMe)
 
-This is the hot path for every agent invocation. p99 here directly
-determines worst-case agent response time under concurrent load.
+Both steps run on the Nirvana VM. Every millisecond reflects local
+compute and storage — no external API variance.
 
 Run:
   python -m benchmarks.retrieval_latency_benchmark
@@ -53,15 +53,12 @@ def measure_latencies() -> list[float]:
     latencies = []
 
     total = len(QUERIES) * ITERATIONS
-    console.print(
-        f"\nRunning [cyan]{total}[/cyan] retrieval queries "
-        f"({len(QUERIES)} unique × {ITERATIONS} iterations)...\n"
-    )
+    console.print(f"\nRunning [cyan]{total}[/cyan] retrieval queries ({len(QUERIES)} unique × {ITERATIONS} iterations)...\n")
 
     for i in range(ITERATIONS):
         for query in QUERIES:
             t0 = time.perf_counter()
-            retriever.invoke(query)
+            _ = retriever.invoke(query)
             latency_ms = (time.perf_counter() - t0) * 1000
             latencies.append(latency_ms)
             console.print(f"  [{i+1}/{ITERATIONS}] {query[:55]:<55} {latency_ms:6.1f} ms")
@@ -94,12 +91,7 @@ def run_retrieval_benchmark():
 
     console.print()
     console.print(table)
-    console.print(
-        "\n[dim]Most latency here is the OpenAI embedding API call (~100–200ms). "
-        "The Qdrant HNSW scan itself typically takes <3ms on NVMe-backed storage "
-        "like Nirvana Cloud ABS. At 1M+ vectors, storage latency becomes the "
-        "dominant factor — where the NVMe advantage is most pronounced.[/dim]"
-    )
+    console.print("\n[dim]Latency breakdown: ~25-50ms local CPU embedding + ~2-5ms Qdrant HNSW search. Both run on the Nirvana VM. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS NVMe is most pronounced.[/dim]")
 
 
 if __name__ == "__main__":

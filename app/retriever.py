@@ -1,15 +1,18 @@
 """
-Vector retriever: connects to Qdrant and returns relevant document chunks.
+Vector retriever: connects to self-hosted Qdrant and returns relevant chunks.
 
-Retrieval latency is directly tied to Qdrant's HNSW index performance,
-which depends on the speed of the underlying block storage. On Nirvana Cloud
-ABS (NVMe), the HNSW scan itself takes <3ms. The dominant latency factor at
-this scale is the OpenAI embedding API call (~100-200ms).
+The embedding model is loaded once into memory and reused across requests.
+At query time:
+  1. Embed the user's question on local CPU (~30ms)
+  2. Run a cosine-similarity search against Qdrant's HNSW index (~3ms on NVMe)
+
+No external APIs. No network round-trips. The full retrieval path runs on
+the Nirvana VM and is bound by CPU + storage I/O.
 """
 
 from functools import lru_cache
 
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain.schema import BaseRetriever
 
@@ -17,23 +20,21 @@ from app.config import settings
 
 
 @lru_cache(maxsize=1)
+def get_embeddings() -> HuggingFaceEmbeddings:
+    return HuggingFaceEmbeddings(model_name=settings.embedding_model)
+
+
+@lru_cache(maxsize=1)
 def get_vector_store() -> QdrantVectorStore:
     """
-    Return a cached QdrantVectorStore instance.
-
-    lru_cache ensures we reuse the connection across requests,
-    avoiding per-request connection overhead.
+    Return a cached QdrantVectorStore. The embedding model and the Qdrant
+    connection are both reused across requests via lru_cache.
     """
-    embeddings = OpenAIEmbeddings(
-        model=settings.embedding_model,
-        openai_api_key=settings.openai_api_key,
-    )
-    url = settings.qdrant_url or f"http://{settings.qdrant_host}:{settings.qdrant_port}"
+    url = f"http://{settings.qdrant_host}:{settings.qdrant_port}"
     return QdrantVectorStore.from_existing_collection(
-        embedding=embeddings,
+        embedding=get_embeddings(),
         collection_name=settings.qdrant_collection_name,
         url=url,
-        api_key=settings.qdrant_api_key,
     )
 
 

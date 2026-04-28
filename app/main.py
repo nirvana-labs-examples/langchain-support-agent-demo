@@ -1,10 +1,10 @@
 """
-FastAPI application exposing the support agent via a REST API.
+FastAPI application exposing semantic search over the support knowledge base.
 
 Endpoints:
-  GET  /        — welcome
-  GET  /health  — Qdrant connectivity check
-  POST /ask     — ask the agent a question
+  GET  /         — welcome
+  GET  /health   — Qdrant connectivity check
+  POST /search   — semantic search; returns top-K matching chunks with scores
 """
 
 import time
@@ -16,50 +16,55 @@ from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
 from app.config import settings
-from app.agent import run_agent
+from app.retriever import get_vector_store
 
 
-class AskRequest(BaseModel):
-    question: str = Field(
+class SearchRequest(BaseModel):
+    query: str = Field(
         ...,
         min_length=3,
         max_length=1000,
-        example="What is our refund policy for annual enterprise customers?",
+        examples=["What is the refund policy for enterprise customers?"],
     )
+    top_k: int = Field(default=5, ge=1, le=20)
 
 
-class AskResponse(BaseModel):
-    question: str
-    answer: str
-    sources: list[str]
+class SearchResult(BaseModel):
+    text: str
+    source: str
+    score: float
+    metadata: dict[str, object]
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchResult]
     latency_ms: float
-    model: str
+    embedding_model: str
 
 
 class HealthResponse(BaseModel):
     status: str
     qdrant: str
-    model: str
+    embedding_model: str
     collection: str
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Warm up the cached vector store so the first request isn't slow
-    from app.retriever import get_vector_store
+async def lifespan(_app: FastAPI):
     try:
-        get_vector_store()
-        print("Retriever warmed up successfully.")
+        _ = get_vector_store()
+        print("Embedding model and Qdrant connection warmed up.")
     except Exception as e:
         print(f"Warning: could not warm up retriever: {e}")
     yield
 
 
 app = FastAPI(
-    title="Nirvana Cloud Support Agent",
+    title="Nirvana Cloud Support Search",
     description=(
-        "AI-powered customer support agent backed by LangChain, Qdrant, and OpenAI. "
-        "Demonstrates infrastructure-heavy AI agent workloads on Nirvana Cloud."
+        "Semantic search over a customer-support knowledge base. "
+        "Local embedding model + self-hosted Qdrant. No external APIs."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -76,9 +81,9 @@ app.add_middleware(
 @app.get("/", tags=["Meta"])
 def root():
     return {
-        "name": "Nirvana Cloud Support Agent",
+        "name": "Nirvana Cloud Support Search",
         "docs": "/docs",
-        "ask": "POST /ask",
+        "search": "POST /search",
         "health": "GET /health",
     }
 
@@ -98,31 +103,43 @@ def health():
     return HealthResponse(
         status="ok" if qdrant_status == "ok" else "degraded",
         qdrant=qdrant_status,
-        model=settings.agent_model,
+        embedding_model=settings.embedding_model,
         collection=settings.qdrant_collection_name,
     )
 
 
-@app.post("/ask", response_model=AskResponse, tags=["Agent"])
-def ask(request: AskRequest):
+@app.post("/search", response_model=SearchResponse, tags=["Search"])
+def search(request: SearchRequest):
     """
-    Ask the support agent a question.
+    Semantic search over the support knowledge base.
 
-    The agent searches the knowledge base and returns a grounded answer with
-    source citations. Response time includes: query embedding + vector retrieval
-    + LLM generation.
+    Returns the top-K most relevant chunks with similarity scores and source
+    metadata. Latency includes local query embedding + Qdrant HNSW search.
     """
     start = time.perf_counter()
     try:
-        result = run_agent(request.question)
+        vector_store = get_vector_store()
+        hits = vector_store.similarity_search_with_score(
+            query=request.query,
+            k=request.top_k,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     latency_ms = (time.perf_counter() - start) * 1000
 
-    return AskResponse(
-        question=request.question,
-        answer=result["answer"],
-        sources=result["sources"],
+    results = [
+        SearchResult(
+            text=doc.page_content,
+            source=doc.metadata.get("source", "unknown"),
+            score=round(float(score), 4),
+            metadata={k: v for k, v in doc.metadata.items() if k != "source"},
+        )
+        for doc, score in hits
+    ]
+
+    return SearchResponse(
+        query=request.query,
+        results=results,
         latency_ms=round(latency_ms, 2),
-        model=settings.agent_model,
+        embedding_model=settings.embedding_model,
     )

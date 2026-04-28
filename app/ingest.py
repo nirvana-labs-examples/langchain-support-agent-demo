@@ -1,19 +1,18 @@
 """
-Ingest pipeline: load documents → chunk → embed → store in Qdrant.
+Ingest pipeline: load documents → chunk → embed (locally) → store in Qdrant.
 
-This is where infrastructure matters most: embedding thousands of documents
-and storing vectors requires fast CPUs, ample RAM, and low-latency attached
-block storage (where Qdrant keeps its HNSW index on disk).
+Everything runs on-box: the embedding model (BGE-small) loads into CPU memory,
+chunks are encoded locally, and vectors are written directly to a self-hosted
+Qdrant instance. No external API calls, no API keys.
 """
 
 import sys
 from pathlib import Path
-from typing import List
 
 import pandas as pd
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
@@ -27,7 +26,7 @@ console = Console()
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
-def load_markdown_files() -> List[Document]:
+def load_markdown_files() -> list[Document]:
     docs = []
     for path in sorted(DATA_DIR.glob("**/*.md")):
         text = path.read_text(encoding="utf-8")
@@ -43,7 +42,7 @@ def load_markdown_files() -> List[Document]:
     return docs
 
 
-def load_csv_tickets() -> List[Document]:
+def load_csv_tickets() -> list[Document]:
     csv_path = DATA_DIR / "sample_tickets.csv"
     df = pd.read_csv(csv_path)
     docs = []
@@ -71,32 +70,30 @@ def load_csv_tickets() -> List[Document]:
     return docs
 
 
-def chunk_documents(docs: List[Document]) -> List[Document]:
+def chunk_documents(docs: list[Document]) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
     chunks = splitter.split_documents(docs)
-    console.print(
-        f"  [cyan]Split into[/cyan] {len(chunks)} chunks "
-        f"(size={settings.chunk_size}, overlap={settings.chunk_overlap})"
-    )
+    console.print(f"  [cyan]Split into[/cyan] {len(chunks)} chunks (size={settings.chunk_size}, overlap={settings.chunk_overlap})")
     return chunks
 
 
 def get_qdrant_client() -> QdrantClient:
-    if settings.qdrant_url:
-        return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
     return QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
 
 
-def ensure_collection(client: QdrantClient, vector_size: int = 1536) -> None:
+def ensure_collection(client: QdrantClient) -> None:
     existing = [c.name for c in client.get_collections().collections]
     if settings.qdrant_collection_name not in existing:
-        client.create_collection(
+        _ = client.create_collection(
             collection_name=settings.qdrant_collection_name,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+            vectors_config=VectorParams(
+                size=settings.embedding_dimensions,
+                distance=Distance.COSINE,
+            ),
         )
         console.print(f"  [yellow]Created collection[/yellow] '{settings.qdrant_collection_name}'")
     else:
@@ -119,26 +116,24 @@ def ingest(recreate: bool = False) -> int:
     console.print("\n[bold]Step 2: Chunking[/bold]")
     chunks = chunk_documents(docs)
 
-    console.print("\n[bold]Step 3: Connecting to Qdrant[/bold]")
+    console.print("\n[bold]Step 3: Loading embedding model[/bold]")
+    embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model)
+    console.print(f"  Loaded [cyan]{settings.embedding_model}[/cyan] ({settings.embedding_dimensions} dims)")
+
+    console.print("\n[bold]Step 4: Connecting to Qdrant[/bold]")
     client = get_qdrant_client()
     console.print(f"  Connected to Qdrant at [cyan]{settings.qdrant_host}:{settings.qdrant_port}[/cyan]")
 
     if recreate:
         existing = [c.name for c in client.get_collections().collections]
         if settings.qdrant_collection_name in existing:
-            client.delete_collection(settings.qdrant_collection_name)
+            _ = client.delete_collection(settings.qdrant_collection_name)
             console.print(f"  [red]Deleted[/red] existing collection '{settings.qdrant_collection_name}'")
 
-    # text-embedding-3-small produces 1536-dimensional vectors
-    ensure_collection(client, vector_size=1536)
+    ensure_collection(client)
 
-    console.print("\n[bold]Step 4: Embedding and storing vectors[/bold]")
-    embeddings = OpenAIEmbeddings(
-        model=settings.embedding_model,
-        openai_api_key=settings.openai_api_key,
-    )
-
-    qdrant_url = settings.qdrant_url or f"http://{settings.qdrant_host}:{settings.qdrant_port}"
+    console.print("\n[bold]Step 5: Embedding and storing vectors[/bold]")
+    qdrant_url = f"http://{settings.qdrant_host}:{settings.qdrant_port}"
 
     with Progress(
         SpinnerColumn(),
@@ -149,12 +144,11 @@ def ingest(recreate: bool = False) -> int:
         console=console,
     ) as progress:
         task = progress.add_task("Embedding and indexing chunks...", total=len(chunks))
-        QdrantVectorStore.from_documents(
+        _ = QdrantVectorStore.from_documents(
             documents=chunks,
             embedding=embeddings,
             collection_name=settings.qdrant_collection_name,
             url=qdrant_url,
-            api_key=settings.qdrant_api_key,
             force_recreate=False,
         )
         progress.update(task, completed=len(chunks))
@@ -166,4 +160,4 @@ def ingest(recreate: bool = False) -> int:
 
 if __name__ == "__main__":
     recreate = "--recreate" in sys.argv
-    ingest(recreate=recreate)
+    _ = ingest(recreate=recreate)

@@ -1,27 +1,24 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import ClassVar
+
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
 
-    # OpenAI
-    openai_api_key: str = Field(..., description="OpenAI API key")
-
-    # Qdrant
+    # Qdrant (self-hosted via docker-compose.yml)
     qdrant_host: str = Field(default="localhost")
     qdrant_port: int = Field(default=6333)
     qdrant_collection_name: str = Field(default="support_docs")
-    qdrant_api_key: str | None = Field(default=None)
-    qdrant_url: str | None = Field(default=None)  # For Qdrant Cloud
 
-    # LLM / Embedding
-    agent_model: str = Field(default="gpt-4o-mini")
-    embedding_model: str = Field(default="text-embedding-3-small")
+    # Embedding model (HuggingFace, runs locally)
+    embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
+    embedding_dimensions: int = Field(default=384)
 
     # Chunking
     chunk_size: int = Field(default=512)

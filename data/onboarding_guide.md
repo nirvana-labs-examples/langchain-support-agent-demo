@@ -71,4 +71,3 @@ try stopping and restarting it. If the issue persists, open a support ticket.
 - Documentation: docs.nirvanacloud.io
 - Support portal: support.nirvanacloud.io
 - Status page: status.nirvanacloud.io
-- Enterprise hotline: +1-800-NIRVANA (available 24/7 for Enterprise customers)
