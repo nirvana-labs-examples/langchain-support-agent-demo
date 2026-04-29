@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,6 +26,13 @@ class Settings(BaseSettings):
 
     # Retrieval
     retriever_top_k: int = Field(default=5)
+
+    # LLM (used by app.ask / POST /ask)
+    llm_provider: Literal["ollama", "openai"] = Field(default="ollama")
+    ollama_model: str = Field(default="llama3.2:3b")
+    ollama_base_url: str = Field(default="http://localhost:11434")
+    openai_model: str = Field(default="gpt-4o-mini")
+    openai_api_key: str | None = Field(default=None)
 
 
 # Module-level singleton — all modules import from here

@@ -11,22 +11,30 @@ depend on.
 
 ---
 
-## Why this demo doesn't use an LLM
+## Two paths: retrieval-only and grounded answers
 
-Most AI agent demos call out to OpenAI for both embeddings and answer
-generation. When you benchmark such a stack, **>95% of every measurement is
-network latency to OpenAI** — the numbers don't reflect the host
-infrastructure at all.
+The demo exposes the same knowledge base through two paths:
 
-This demo strips back to the hot path that actually depends on local compute
-and storage:
+| Path | Endpoint | Uses LLM? | Used by |
+|------|----------|-----------|---------|
+| **Retrieval-only** | `POST /search`, `python -m app.search` | No | Benchmarks — measures Nirvana CPU + storage |
+| **Grounded answer** | `POST /ask`, `python -m app.ask`         | Yes (Ollama by default, OpenAI optional) | Full agent demo |
+
+The benchmarks deliberately use the retrieval-only path. Most AI demos call
+out to OpenAI for embeddings *and* generation, and **>95% of every benchmark
+measurement becomes network latency to OpenAI** — the numbers don't reflect
+the host infrastructure at all. By keeping the timed path local, every
+millisecond reflects Nirvana's CPU and storage:
 
 1. Embed the user's query with a local model (CPU)
 2. Run a similarity search against Qdrant's HNSW index (CPU + disk)
 3. Return the top-K matching document chunks with relevance scores
 
-No LLM generation step, no external APIs. Every millisecond reflects
-Nirvana's CPU and storage.
+The `app.ask` path layers an LLM on top of those same retrieved chunks to
+produce a structured answer (policy summary, recommended response,
+citations, escalation flag). It runs against a local Ollama model by
+default — still no external APIs required — or against OpenAI if you set a
+key.
 
 ---
 
@@ -101,16 +109,19 @@ source $HOME/.local/bin/env  # or restart your shell
 ```bash
 git clone https://github.com/nirvana-labs-examples/langchain-support-agent-demo.git
 cd langchain-support-agent-demo
-cp .env.example .env
 ```
 
 The default `.env` works out of the box — no keys to fill in.
 
-### 2. Start Qdrant
+### 2. Start services and pull the LLM
 
 ```bash
-docker compose up -d qdrant
+docker compose up -d
+docker compose exec ollama ollama pull llama3.2:3b   # ~2 GB, one-time download
 ```
+
+This starts both Qdrant (vector DB) and Ollama (local LLM). The model download
+takes a minute on first run; subsequent starts are instant.
 
 ### 3. Install dependencies
 
@@ -168,6 +179,51 @@ curl -X POST http://localhost:8000/search \
   -d '{"query": "refund policy for enterprise customers", "top_k": 3}'
 ```
 
+### 6. Ask (grounded answers via LLM)
+
+Where `/search` returns chunks, `/ask` returns a fully-formed structured
+answer: policy summary, recommended response to the customer, citations,
+and an escalation flag.
+
+#### Option A: local LLM via Ollama (default, no API keys)
+
+```bash
+# Ollama runs in Docker (already started in step 2)
+python -m app.ask "A customer wants a refund after 45 days. What should the support rep say?"
+```
+
+You'll see panels for the policy summary, recommended response, citations,
+and an escalation badge.
+
+Switch to a smaller model for speed (`qwen2.5:0.5b`) or a larger one for
+quality (`llama3.2:8b`) by updating `OLLAMA_MODEL` in `.env` and pulling the
+new model:
+
+```bash
+docker compose exec ollama ollama pull qwen2.5:0.5b
+```
+
+#### Option B: OpenAI (opt-in)
+
+```bash
+# in .env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+
+python -m app.ask "..."
+```
+
+#### HTTP
+
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "A customer wants a refund after 45 days. What should the support rep say?"}'
+```
+
+> Note: the benchmarks intentionally hit `/search`, not `/ask`, so LLM
+> generation latency doesn't pollute the storage/CPU numbers.
+
 ---
 
 ## Sample Queries
@@ -180,6 +236,14 @@ curl -X POST http://localhost:8000/search \
 | "high outbound data transfer charges" | Long-tail technical queries |
 | "P1 escalation criteria" | Acronym + policy lookup |
 | "GPU instance VRAM" | Specific factual recall |
+
+For grounded answers (via `python -m app.ask "..."`), try:
+
+| Question | What it demonstrates |
+|----------|----------------------|
+| "A customer wants a refund after 45 days. What should the support rep say?" | Policy reasoning + escalation flag |
+| "Customer says their VM is stuck pending — draft a reply" | Troubleshooting + recommended response |
+| "Is a P2 ticket eligible for after-hours support?" | Cross-document policy synthesis |
 
 ---
 
@@ -218,7 +282,7 @@ The short version:
 langchain-support-agent-demo/
   README.md                        ← you are here
   docker-compose.yml               ← self-hosted Qdrant
-  .env.example                     ← environment variables (no keys needed)
+  .env                             ← environment variables (no keys required)
   requirements.txt                 ← Python dependencies
 
   app/
@@ -226,7 +290,10 @@ langchain-support-agent-demo/
     ingest.py                      ← document → chunk → embed → Qdrant
     retriever.py                   ← cached embedding model + Qdrant connection
     search.py                      ← interactive CLI for semantic search
-    main.py                        ← FastAPI: GET /health, POST /search
+    llm.py                         ← LLM provider factory (ollama | openai)
+    answer.py                      ← retrieve → prompt → structured answer
+    ask.py                         ← interactive CLI for grounded answers
+    main.py                        ← FastAPI: GET /health, POST /search, POST /ask
 
   data/
     refund_policy.md
@@ -256,5 +323,7 @@ langchain-support-agent-demo/
 | API framework       | FastAPI                           | Auto-docs, Pydantic-native             |
 | Embedding model     | `BAAI/bge-small-en-v1.5` (local)  | High retrieval quality on CPU, no API  |
 | Vector DB           | Qdrant (self-hosted, Docker)      | HNSW-on-disk, single-binary deploy     |
+| LLM (default)       | Ollama + `llama3.2:3b` (local)    | Self-hosted, no API keys, runs on CPU  |
+| LLM (opt-in)        | OpenAI `gpt-4o-mini`              | Hosted alternative when speed matters  |
 | Config              | Pydantic Settings v2              | Type-safe `.env` parsing               |
 | Infra               | Nirvana Cloud VM + ABS            | Purpose-built for stateful AI workloads|

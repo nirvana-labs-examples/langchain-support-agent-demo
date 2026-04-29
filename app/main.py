@@ -1,10 +1,11 @@
 """
-FastAPI application exposing semantic search over the support knowledge base.
+FastAPI application exposing semantic search and grounded answers.
 
 Endpoints:
   GET  /         — welcome
   GET  /health   — Qdrant connectivity check
   POST /search   — semantic search; returns top-K matching chunks with scores
+  POST /ask      — grounded structured answer via the configured LLM
 """
 
 import time
@@ -15,7 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
+from app.answer import SupportAnswer, answer
 from app.config import settings
+from app.llm import llm_label
 from app.retriever import get_vector_store
 
 
@@ -78,12 +81,29 @@ app.add_middleware(
 )
 
 
+class AskRequest(BaseModel):
+    question: str = Field(
+        ...,
+        min_length=3,
+        max_length=2000,
+        examples=["A customer wants a refund after 45 days. What should the support rep say?"],
+    )
+
+
+class AskResponse(BaseModel):
+    question: str
+    answer: SupportAnswer
+    latency_ms: float
+    llm: str
+
+
 @app.get("/", tags=["Meta"])
 def root():
     return {
         "name": "Nirvana Cloud Support Search",
         "docs": "/docs",
         "search": "POST /search",
+        "ask": "POST /ask",
         "health": "GET /health",
     }
 
@@ -142,4 +162,27 @@ def search(request: SearchRequest):
         results=results,
         latency_ms=round(latency_ms, 2),
         embedding_model=settings.embedding_model,
+    )
+
+
+@app.post("/ask", response_model=AskResponse, tags=["Ask"])
+def ask(request: AskRequest):
+    """
+    Grounded structured answer.
+
+    Retrieves top-K chunks from Qdrant, sends them with the question to the
+    configured LLM (ollama by default, OpenAI when LLM_PROVIDER=openai), and
+    returns a SupportAnswer (summary, recommended response, citations,
+    escalation flag).
+    """
+    try:
+        result, latency_ms = answer(request.question)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return AskResponse(
+        question=request.question,
+        answer=result,
+        latency_ms=round(latency_ms, 2),
+        llm=llm_label(),
     )
