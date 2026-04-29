@@ -29,11 +29,15 @@ def get_vector_store() -> QdrantVectorStore:
     """
     Return a cached QdrantVectorStore. The embedding model and the Qdrant
     connection are both reused across requests via lru_cache.
+
+    Collection name is scoped to the active dataset:
+    e.g., support_docs_small or support_docs_medium.
     """
     url = f"http://{settings.qdrant_host}:{settings.qdrant_port}"
+    collection_name = f"{settings.qdrant_collection_name}_{settings.dataset}"
     return QdrantVectorStore.from_existing_collection(
         embedding=get_embeddings(),
-        collection_name=settings.qdrant_collection_name,
+        collection_name=collection_name,
         url=url,
     )
 

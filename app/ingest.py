@@ -8,7 +8,6 @@ Qdrant instance. No external API calls, no API keys.
 
 import sys
 from pathlib import Path
-
 import pandas as pd
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
@@ -23,27 +22,37 @@ from app.config import settings
 
 console = Console()
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+_REPO_ROOT = Path(__file__).parent.parent
 
 
-def load_markdown_files() -> list[Document]:
+def _data_dir(dataset: str) -> Path:
+    return _REPO_ROOT / "data" / dataset
+
+
+def _collection_name(dataset: str) -> str:
+    return f"{settings.qdrant_collection_name}_{dataset}"
+
+
+def load_markdown_files(dataset: str) -> list[Document]:
+    data_dir = _data_dir(dataset)
     docs = []
-    for path in sorted(DATA_DIR.glob("**/*.md")):
+    for path in sorted(data_dir.glob("**/*.md")):
         text = path.read_text(encoding="utf-8")
         docs.append(Document(
             page_content=text,
             metadata={
-                "source": str(path.relative_to(DATA_DIR)),
+                "source": str(path.relative_to(data_dir)),
                 "file_type": "markdown",
                 "filename": path.name,
             },
         ))
-        console.print(f"  [green]Loaded[/green] {path.relative_to(DATA_DIR)}")
+    console.print(f"  [green]Loaded[/green] {len(docs)} markdown files")
     return docs
 
 
-def load_csv_tickets() -> list[Document]:
-    csv_path = DATA_DIR / "sample_tickets.csv"
+def load_csv_tickets(dataset: str) -> list[Document]:
+    data_dir = _data_dir(dataset)
+    csv_path = data_dir / "sample_tickets.csv"
     df = pd.read_csv(csv_path)
     docs = []
     for _, row in df.iterrows():
@@ -85,32 +94,34 @@ def get_qdrant_client() -> QdrantClient:
     return QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
 
 
-def ensure_collection(client: QdrantClient) -> None:
+def ensure_collection(client: QdrantClient, collection_name: str) -> None:
     existing = [c.name for c in client.get_collections().collections]
-    if settings.qdrant_collection_name not in existing:
+    if collection_name not in existing:
         _ = client.create_collection(
-            collection_name=settings.qdrant_collection_name,
+            collection_name=collection_name,
             vectors_config=VectorParams(
                 size=settings.embedding_dimensions,
                 distance=Distance.COSINE,
             ),
         )
-        console.print(f"  [yellow]Created collection[/yellow] '{settings.qdrant_collection_name}'")
+        console.print(f"  [yellow]Created collection[/yellow] '{collection_name}'")
     else:
-        console.print(f"  [blue]Collection[/blue] '{settings.qdrant_collection_name}' already exists")
+        console.print(f"  [blue]Collection[/blue] '{collection_name}' already exists")
 
 
-def ingest(recreate: bool = False) -> int:
+def ingest(dataset: str, recreate: bool = False) -> int:
     """
-    Full ingest pipeline. Returns the number of chunks stored.
+    Full ingest pipeline for the given dataset. Returns the number of chunks stored.
 
     Args:
-        recreate: If True, deletes and recreates the collection before ingesting.
+        dataset:  "small" or "medium"
+        recreate: If True, drops and recreates the collection before ingesting.
     """
-    console.rule("[bold magenta]Nirvana Support Agent — Ingest Pipeline[/bold magenta]")
+    collection_name = _collection_name(dataset)
+    console.rule(f"[bold magenta]Nirvana Support Agent — Ingest Pipeline ({dataset})[/bold magenta]")
 
     console.print("\n[bold]Step 1: Loading documents[/bold]")
-    docs = load_markdown_files() + load_csv_tickets()
+    docs = load_markdown_files(dataset) + load_csv_tickets(dataset)
     console.print(f"  Total documents loaded: [bold]{len(docs)}[/bold]")
 
     console.print("\n[bold]Step 2: Chunking[/bold]")
@@ -126,11 +137,11 @@ def ingest(recreate: bool = False) -> int:
 
     if recreate:
         existing = [c.name for c in client.get_collections().collections]
-        if settings.qdrant_collection_name in existing:
-            _ = client.delete_collection(settings.qdrant_collection_name)
-            console.print(f"  [red]Deleted[/red] existing collection '{settings.qdrant_collection_name}'")
+        if collection_name in existing:
+            _ = client.delete_collection(collection_name)
+            console.print(f"  [red]Deleted[/red] existing collection '{collection_name}'")
 
-    ensure_collection(client)
+    ensure_collection(client, collection_name)
 
     console.print("\n[bold]Step 5: Embedding and storing vectors[/bold]")
     qdrant_url = f"http://{settings.qdrant_host}:{settings.qdrant_port}"
@@ -147,17 +158,29 @@ def ingest(recreate: bool = False) -> int:
         _ = QdrantVectorStore.from_documents(
             documents=chunks,
             embedding=embeddings,
-            collection_name=settings.qdrant_collection_name,
+            collection_name=collection_name,
             url=qdrant_url,
             force_recreate=False,
         )
         progress.update(task, completed=len(chunks))
 
-    console.print(f"\n[bold green]Ingest complete![/bold green] {len(chunks)} chunks stored.")
+    console.print(f"\n[bold green]Ingest complete![/bold green] {len(chunks)} chunks stored in '{collection_name}'.")
     console.rule()
     return len(chunks)
 
 
+def _parse_args() -> tuple[str, bool]:
+    args = sys.argv[1:]
+    dataset: str = settings.dataset
+    recreate = False
+    for arg in args:
+        if arg in ("small", "medium"):
+            dataset = arg
+        elif arg == "--recreate":
+            recreate = True
+    return dataset, recreate
+
+
 if __name__ == "__main__":
-    recreate = "--recreate" in sys.argv
-    _ = ingest(recreate=recreate)
+    _dataset, _recreate = _parse_args()
+    _ = ingest(dataset=_dataset, recreate=_recreate)

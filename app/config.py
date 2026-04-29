@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Retrieval
     retriever_top_k: int = Field(default=5)
 
+    # Dataset (determines data dir and Qdrant collection)
+    dataset: Literal["small", "medium"] = Field(default="medium")
+
     # LLM (used by app.ask / POST /ask)
     llm_provider: Literal["ollama", "openai"] = Field(default="ollama")
     ollama_model: str = Field(default="llama3.2:3b")

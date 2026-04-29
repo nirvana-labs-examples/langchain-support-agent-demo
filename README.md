@@ -137,11 +137,18 @@ HuggingFace and caches it locally. Subsequent runs are fully offline.
 ### 4. Ingest the knowledge base
 
 ```bash
-python -m app.ingest
+python -m app.ingest          # uses DATASET from .env (default: medium)
+python -m app.ingest small    # ingest the small dataset explicitly
+python -m app.ingest medium   # ingest the medium dataset explicitly
+python -m app.ingest --recreate  # drop and rebuild the collection
 ```
 
-You'll see the loading → chunking → embedding → indexing pipeline run with
-progress output. Takes a few seconds on a modern CPU.
+The medium dataset has ~26x more content than small (52 extra help-center
+articles + 2,000 tickets). You can ingest both and switch between them by
+changing `DATASET` in `.env`.
+
+Each dataset uses its own Qdrant collection (`support_docs_small`,
+`support_docs_medium`) so they coexist without conflicts.
 
 ### 5. Search
 
