@@ -174,7 +174,7 @@ def _parse_args() -> tuple[str, bool]:
     dataset: str = settings.dataset
     recreate = False
     for arg in args:
-        if arg in ("small", "medium"):
+        if arg in ("small", "medium", "large"):
             dataset = arg
         elif arg == "--recreate":
             recreate = True

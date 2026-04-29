@@ -1,21 +1,29 @@
 """
-Generate the medium dataset into data/medium/.
+Generate the medium (10 MB) and large (100 MB) datasets.
 
-Copies data/small/ as-is, then adds:
-  - 80 additional help center articles covering a broad topic range
-  - 2,000 synthetic support tickets
+Each dataset copies data/small/ then adds 52 help-center articles and a
+scaled synthetic ticket CSV:
+  - medium : ~46,000 tickets  → ~10 MB
+  - large  : ~470,000 tickets → ~100 MB
 
 Run:
-  python -m scripts.generate_dataset
+  python -m scripts.generate_dataset          # generates both
+  python -m scripts.generate_dataset medium
+  python -m scripts.generate_dataset large
 """
 
 import csv
 import shutil
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 SMALL = ROOT / "data" / "small"
-MEDIUM = ROOT / "data" / "medium"
+
+DATASETS: dict[str, int] = {
+    "medium": 46_000,
+    "large": 470_000,
+}
 
 # ---------------------------------------------------------------------------
 # Help center articles
@@ -3519,7 +3527,7 @@ def _make_ticket(row_num: int) -> dict[str, str]:
     date = f"2024-{month:02d}-{day:02d}"
 
     return {
-        "ticket_id": f"T-{row_num + 1:04d}",
+        "ticket_id": f"T-{row_num + 1:07d}",
         "date": date,
         "customer_tier": tier,
         "subject": subject,
@@ -3533,38 +3541,41 @@ def _make_ticket(row_num: int) -> dict[str, str]:
 # Generator
 # ---------------------------------------------------------------------------
 
-def generate_medium() -> None:
-    print("Generating data/medium/ ...")
+def generate(name: str, num_tickets: int) -> None:
+    dest = ROOT / "data" / name
+    print(f"Generating data/{name}/ ({num_tickets:,} tickets) ...")
 
-    if MEDIUM.exists():
-        shutil.rmtree(MEDIUM)
-    MEDIUM.mkdir(parents=True)
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
 
-    # Copy everything from small
-    _ = shutil.copytree(SMALL, MEDIUM, dirs_exist_ok=True)
+    _ = shutil.copytree(SMALL, dest, dirs_exist_ok=True)
     print(f"  Copied {len(list(SMALL.rglob('*')))} files from data/small/")
 
-    # Write extra help center articles
-    articles_dir = MEDIUM / "help_center_articles"
+    articles_dir = dest / "help_center_articles"
     articles_dir.mkdir(exist_ok=True)
     for filename, _title, content in ARTICLES:
         _ = (articles_dir / filename).write_text(content, encoding="utf-8")
     print(f"  Generated {len(ARTICLES)} additional help center articles")
 
-    # Generate 2000-row tickets CSV
-    tickets_path = MEDIUM / "sample_tickets.csv"
+    tickets_path = dest / "sample_tickets.csv"
     fieldnames = ["ticket_id", "date", "customer_tier", "subject", "description", "status", "resolution"]
     with tickets_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for i in range(2000):
+        for i in range(num_tickets):
             writer.writerow(_make_ticket(i))
-    print("  Generated 2000-row sample_tickets.csv")
+    print(f"  Generated {num_tickets:,}-row sample_tickets.csv")
 
-    total_bytes = sum(p.stat().st_size for p in MEDIUM.rglob("*") if p.is_file())
-    print(f"  Total size: {total_bytes / 1024:.0f} KB")
-    print("Done. data/medium/ is ready.")
+    total_bytes = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+    print(f"  Total size: {total_bytes / 1_000_000:.1f} MB")
+    print(f"Done. data/{name}/ is ready.\n")
 
 
 if __name__ == "__main__":
-    generate_medium()
+    targets = sys.argv[1:] or list(DATASETS.keys())
+    for target in targets:
+        if target not in DATASETS:
+            print(f"Unknown dataset: {target!r}. Choose from: {', '.join(DATASETS)}")
+            sys.exit(1)
+        generate(target, DATASETS[target])

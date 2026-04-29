@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     retriever_top_k: int = Field(default=5)
 
     # Dataset (determines data dir and Qdrant collection)
-    dataset: Literal["small", "medium"] = Field(default="medium")
+    dataset: Literal["small", "medium", "large"] = Field(default="medium")
 
     # LLM (used by app.ask / POST /ask)
     llm_provider: Literal["ollama", "openai"] = Field(default="ollama")

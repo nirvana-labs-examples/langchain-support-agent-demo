@@ -1,19 +1,21 @@
 """
 Benchmark: document ingest throughput with local embeddings.
 
-Measures end-to-end ingest time, broken into:
+Measures end-to-end ingest time against real dataset content, broken into:
   - Embedding (CPU-bound, local sentence-transformers model)
   - Qdrant write (disk I/O bound, HNSW index construction)
 
 Both steps run on the Nirvana VM. No external API calls.
 
 Run:
-  python -m benchmarks.ingest_benchmark
+  python -m benchmarks.ingest_benchmark           # uses medium dataset
+  python -m benchmarks.ingest_benchmark small
+  python -m benchmarks.ingest_benchmark large
 """
 
+import sys
 import time
 
-from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
@@ -22,38 +24,27 @@ from rich.console import Console
 from rich.table import Table
 
 from app.config import settings
+from app.ingest import load_csv_tickets, load_markdown_files
 
 console = Console()
 
 BENCH_COLLECTION = "benchmark_ingest"
-DOC_COUNT = 100
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 64
 
 
-def generate_synthetic_docs(n: int) -> list[Document]:
-    template = (
-        "Support Article #{i}\n\n"
-        "This article covers common issues related to topic #{i} on Nirvana Cloud. "
-        "Customers experiencing this issue should follow these steps:\n\n"
-        "1. Check the current status at status.nirvanacloud.io.\n"
-        "2. Restart the affected service.\n"
-        "3. If the problem persists, open a support ticket with logs attached.\n\n"
-        "Common symptoms include slow response times, failed API calls, and "
-        "unexpected billing charges. The Nirvana Cloud team monitors all services "
-        "24/7 and will respond to P1 issues within 15 minutes.\n"
+def run_ingest_benchmark() -> None:
+    console.rule(f"[bold magenta]Ingest Throughput Benchmark — dataset: {settings.dataset}[/bold magenta]")
+
+    console.print("\n[bold]Loading dataset documents...[/bold]")
+    docs = load_markdown_files(settings.dataset) + load_csv_tickets(settings.dataset)
+    console.print(f"  Total: [cyan]{len(docs)}[/cyan] documents")
+
+    console.print("\n[dim]Chunking documents...[/dim]")
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
     )
-    return [
-        Document(
-            page_content=template.format(i=i),
-            metadata={"source": f"synthetic_{i}.md", "benchmark": True},
-        )
-        for i in range(n)
-    ]
-
-
-def run_ingest_benchmark():
-    console.rule("[bold magenta]Ingest Throughput Benchmark[/bold magenta]")
+    chunks = splitter.split_documents(docs)
+    console.print(f"  -> [cyan]{len(chunks)}[/cyan] chunks")
 
     console.print("\n[dim]Loading embedding model...[/dim]")
     t0 = time.perf_counter()
@@ -61,29 +52,17 @@ def run_ingest_benchmark():
     load_time = time.perf_counter() - t0
     console.print(f"  Loaded [cyan]{settings.embedding_model}[/cyan] in {load_time:.1f}s")
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
-
     existing = [c.name for c in client.get_collections().collections]
     if BENCH_COLLECTION in existing:
         _ = client.delete_collection(BENCH_COLLECTION)
     _ = client.create_collection(
         collection_name=BENCH_COLLECTION,
-        vectors_config=VectorParams(
-            size=settings.embedding_dimensions,
-            distance=Distance.COSINE,
-        ),
+        vectors_config=VectorParams(size=settings.embedding_dimensions, distance=Distance.COSINE),
     )
 
-    console.print(f"\nGenerating [cyan]{DOC_COUNT}[/cyan] synthetic documents...")
-    docs = generate_synthetic_docs(DOC_COUNT)
-
-    console.print("Chunking documents...")
-    chunks = splitter.split_documents(docs)
-    console.print(f"  -> [cyan]{len(chunks)}[/cyan] chunks")
-
     # --- Embedding phase (CPU-bound) ---
-    console.print(f"\nEmbedding {len(chunks)} chunks (CPU)...")
+    console.print(f"\nEmbedding [cyan]{len(chunks)}[/cyan] chunks (CPU)...")
     t_embed_start = time.perf_counter()
     vectors = embeddings.embed_documents([c.page_content for c in chunks])
     embed_time = time.perf_counter() - t_embed_start
@@ -91,7 +70,8 @@ def run_ingest_benchmark():
     console.print(f"  Done in [green]{embed_time:.2f}s[/green] ([cyan]{embed_throughput:.1f}[/cyan] chunks/sec)")
 
     # --- Write phase (disk I/O bound) ---
-    console.print(f"\nWriting {len(chunks)} vectors to Qdrant...")
+    BATCH_SIZE = 512
+    console.print(f"\nWriting [cyan]{len(chunks)}[/cyan] vectors to Qdrant (batch_size={BATCH_SIZE})...")
     points = [
         PointStruct(
             id=i,
@@ -101,7 +81,12 @@ def run_ingest_benchmark():
         for i, (vec, chunk) in enumerate(zip(vectors, chunks))
     ]
     t_write_start = time.perf_counter()
-    _ = client.upsert(collection_name=BENCH_COLLECTION, points=points, wait=True)
+    for batch_start in range(0, len(points), BATCH_SIZE):
+        _ = client.upsert(
+            collection_name=BENCH_COLLECTION,
+            points=points[batch_start : batch_start + BATCH_SIZE],
+            wait=True,
+        )
     write_time = time.perf_counter() - t_write_start
     write_throughput = len(chunks) / write_time
     console.print(f"  Done in [green]{write_time:.2f}s[/green] ([cyan]{write_throughput:.0f}[/cyan] vectors/sec)")
@@ -112,7 +97,8 @@ def run_ingest_benchmark():
     table = Table(title="Ingest Benchmark Results", show_header=True)
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
-    table.add_row("Documents", str(DOC_COUNT))
+    table.add_row("Dataset", settings.dataset)
+    table.add_row("Documents", str(len(docs)))
     table.add_row("Chunks", str(len(chunks)))
     table.add_row("Embedding time", f"{embed_time:.2f}s")
     table.add_row("Embedding throughput", f"{embed_throughput:.1f} chunks/sec")
@@ -128,4 +114,7 @@ def run_ingest_benchmark():
 
 
 if __name__ == "__main__":
+    args = [a for a in sys.argv[1:] if a in ("small", "medium", "large")]
+    if args:
+        settings.dataset = args[0]  # pyright: ignore[reportAttributeAccessIssue]
     run_ingest_benchmark()
