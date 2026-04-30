@@ -1,15 +1,14 @@
 """
-Benchmark: document ingest throughput with local embeddings.
+Benchmark: document ingest throughput.
 
-Measures end-to-end ingest time against real dataset content, broken into:
-  - Embedding (CPU-bound, local sentence-transformers model)
-  - Qdrant write (disk I/O bound, HNSW index construction)
-
-Both steps run on the Nirvana VM. No external API calls.
+Measures the Qdrant write phase (disk I/O bound — HNSW index construction).
+If pre-computed embeddings exist (run `python -m benchmarks.precompute` first),
+the CPU-bound embedding step is skipped entirely so the numbers reflect only
+storage performance. Otherwise, embeddings are computed on the fly.
 
 Run:
-  python -m benchmarks.ingest           # uses medium dataset
-  python -m benchmarks.ingest small
+  python -m benchmarks.precompute           # pre-compute embeddings once
+  python -m benchmarks.ingest              # uses medium, skips embedding if cached
   python -m benchmarks.ingest large
 """
 
@@ -26,10 +25,12 @@ from rich.table import Table
 
 from app.config import settings
 from app.ingest import load_csv_tickets, load_markdown_files
+from benchmarks.precompute import cache_key, is_cached, load_cache
 
 console = Console()
 
 BENCH_COLLECTION = "benchmark_ingest"
+BATCH_SIZE = 512
 
 
 def _percentile(data: list[float], p: float) -> float:
@@ -41,25 +42,55 @@ def _percentile(data: list[float], p: float) -> float:
 
 
 def run_ingest_benchmark() -> None:
-    console.rule(f"[bold magenta]Ingest Throughput Benchmark — dataset: {settings.dataset}[/bold magenta]")
+    dataset = settings.dataset
+    console.rule(f"[bold magenta]Ingest Throughput Benchmark — dataset: {dataset}[/bold magenta]")
 
-    console.print("\n[bold]Loading dataset documents...[/bold]")
-    docs = load_markdown_files(settings.dataset) + load_csv_tickets(settings.dataset)
-    console.print(f"  Total: [cyan]{len(docs)}[/cyan] documents")
+    embed_time: float | None = None
+    embed_throughput: float | None = None
 
-    console.print("\n[dim]Chunking documents...[/dim]")
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
-    )
-    chunks = splitter.split_documents(docs)
-    console.print(f"  -> [cyan]{len(chunks)}[/cyan] chunks")
+    if is_cached(dataset):
+        console.print(f"\n[green]Using pre-computed embeddings[/green] (cache key: {cache_key(dataset)})")
+        vectors, payloads = load_cache(dataset)
+        num_chunks = len(vectors)
+        console.print(f"  Loaded [cyan]{num_chunks}[/cyan] vectors from cache")
+        points = [
+            PointStruct(id=i, vector=vec, payload=payload)
+            for i, (vec, payload) in enumerate(zip(vectors, payloads))
+        ]
+    else:
+        console.print("\n[yellow]No cache found — embedding on the fly.[/yellow] Run [bold]python -m benchmarks.precompute[/bold] to skip this step.")
 
-    console.print("\n[dim]Loading embedding model...[/dim]")
-    t0 = time.perf_counter()
-    embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model)
-    load_time = time.perf_counter() - t0
-    console.print(f"  Loaded [cyan]{settings.embedding_model}[/cyan] in {load_time:.1f}s")
+        console.print("\n[bold]Loading documents...[/bold]")
+        docs = load_markdown_files(dataset) + load_csv_tickets(dataset)
+        console.print(f"  Total: [cyan]{len(docs)}[/cyan] documents")
+
+        console.print("\n[dim]Chunking...[/dim]")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
+        chunks = splitter.split_documents(docs)
+        num_chunks = len(chunks)
+        console.print(f"  -> [cyan]{num_chunks}[/cyan] chunks")
+
+        console.print("\n[dim]Loading embedding model...[/dim]")
+        embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model)
+
+        console.print(f"\nEmbedding [cyan]{num_chunks}[/cyan] chunks (CPU)...")
+        t_embed_start = time.perf_counter()
+        vectors = embeddings.embed_documents([c.page_content for c in chunks])
+        embed_time = time.perf_counter() - t_embed_start
+        embed_throughput = num_chunks / embed_time
+        console.print(f"  Done in [green]{embed_time:.2f}s[/green] ([cyan]{embed_throughput:.1f}[/cyan] chunks/sec)")
+
+        points = [
+            PointStruct(
+                id=i,
+                vector=vec,
+                payload={"text": chunk.page_content, **chunk.metadata},
+            )
+            for i, (vec, chunk) in enumerate(zip(vectors, chunks))
+        ]
 
     client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
     existing = [c.name for c in client.get_collections().collections]
@@ -70,25 +101,8 @@ def run_ingest_benchmark() -> None:
         vectors_config=VectorParams(size=settings.embedding_dimensions, distance=Distance.COSINE),
     )
 
-    # --- Embedding phase (CPU-bound) ---
-    console.print(f"\nEmbedding [cyan]{len(chunks)}[/cyan] chunks (CPU)...")
-    t_embed_start = time.perf_counter()
-    vectors = embeddings.embed_documents([c.page_content for c in chunks])
-    embed_time = time.perf_counter() - t_embed_start
-    embed_throughput = len(chunks) / embed_time
-    console.print(f"  Done in [green]{embed_time:.2f}s[/green] ([cyan]{embed_throughput:.1f}[/cyan] chunks/sec)")
-
     # --- Write phase (disk I/O bound) ---
-    BATCH_SIZE = 512
-    console.print(f"\nWriting [cyan]{len(chunks)}[/cyan] vectors to Qdrant (batch_size={BATCH_SIZE})...")
-    points = [
-        PointStruct(
-            id=i,
-            vector=vec,
-            payload={"text": chunk.page_content, **chunk.metadata},
-        )
-        for i, (vec, chunk) in enumerate(zip(vectors, chunks))
-    ]
+    console.print(f"\nWriting [cyan]{num_chunks}[/cyan] vectors to Qdrant (batch_size={BATCH_SIZE})...")
     batch_latencies_ms: list[float] = []
     t_write_start = time.perf_counter()
     for batch_start in range(0, len(points), BATCH_SIZE):
@@ -100,33 +114,29 @@ def run_ingest_benchmark() -> None:
         )
         batch_latencies_ms.append((time.perf_counter() - t_batch) * 1000)
     write_time = time.perf_counter() - t_write_start
-    write_throughput = len(chunks) / write_time
+    write_throughput = num_chunks / write_time
     console.print(f"  Done in [green]{write_time:.2f}s[/green] ([cyan]{write_throughput:.0f}[/cyan] vectors/sec)")
 
-    total_time = embed_time + write_time
     _ = client.delete_collection(BENCH_COLLECTION)
 
     table = Table(title="Ingest Benchmark Results", show_header=True)
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
-    table.add_row("Dataset", settings.dataset)
-    table.add_row("Documents", str(len(docs)))
-    table.add_row("Chunks", str(len(chunks)))
-    table.add_row("Embedding time", f"{embed_time:.2f}s")
-    table.add_row("Embedding throughput", f"{embed_throughput:.1f} chunks/sec")
+    table.add_row("Dataset", dataset)
+    table.add_row("Chunks", str(num_chunks))
+    table.add_row("Embeddings", "pre-cached" if embed_time is None else f"{embed_time:.2f}s ({embed_throughput:.0f} chunks/sec)")
     table.add_row("Qdrant write time", f"{write_time:.2f}s")
     table.add_row("Qdrant write throughput", f"{write_throughput:.0f} vectors/sec")
     table.add_row("Write batches", str(len(batch_latencies_ms)))
     table.add_row("Batch latency p50", f"{statistics.median(batch_latencies_ms):.0f} ms")
     table.add_row("Batch latency p95", f"{_percentile(batch_latencies_ms, 95):.0f} ms")
     table.add_row("Batch latency p99", f"{_percentile(batch_latencies_ms, 99):.0f} ms")
-    table.add_row("Total time", f"{total_time:.2f}s")
     table.add_row("Embedding model", settings.embedding_model)
     table.add_row("Vector dimensions", str(settings.embedding_dimensions))
 
     console.print()
     console.print(table)
-    console.print("\n[dim]Embedding is CPU-bound — scales with vCPU count and clock speed.\nQdrant write is disk-I/O-bound — scales with ABS IOPS. Both run entirely on the Nirvana VM.[/dim]")
+    console.print("\n[dim]Qdrant write is disk-I/O-bound — scales with ABS IOPS. Run python -m benchmarks.precompute first to isolate write performance from CPU embedding time.[/dim]")
 
 
 if __name__ == "__main__":

@@ -277,23 +277,31 @@ For grounded answers (via `python -m app.ask "..."`), try:
 
 Both benchmarks accept an optional dataset argument and default to `medium`.
 
-**Ingest benchmark** — standalone. Loads the dataset files, embeds them, and
-writes to a temporary `benchmark_ingest` collection that's deleted on exit.
-You do **not** need to run `app.ingest` first.
+**Ingest benchmark** — standalone, no prior setup needed. Pre-computed embeddings
+for all three datasets are included in the repo (`benchmarks/.cache/`), so the
+benchmark skips the CPU-bound embedding step and measures only Qdrant write
+throughput (disk I/O).
 
 ```bash
-# chunks/sec (CPU embedding) + vectors/sec (disk write)
-python -m benchmarks.ingest                  # medium (default)
+python -m benchmarks.ingest             # medium (default)
+python -m benchmarks.ingest small
 python -m benchmarks.ingest large
 ```
 
-**Retrieval benchmark** — requires the dataset's collection to already exist,
-so run `python -m app.ingest <dataset>` first.
+If you change the dataset or chunking settings and need to regenerate the cache:
 
 ```bash
-python -m app.ingest medium                            # one-time setup
-python -m benchmarks.retrieval       # medium, 200 queries
-python -m benchmarks.retrieval large # 500 queries (after ingesting large)
+python -m benchmarks.precompute         # regenerate for medium
+python -m benchmarks.precompute large
+```
+
+**Retrieval benchmark** — requires the dataset's Qdrant collection to exist.
+Run `python -m app.ingest <dataset>` once to populate it.
+
+```bash
+python -m app.ingest medium                      # one-time setup
+python -m benchmarks.retrieval                   # medium, 200 queries
+python -m benchmarks.retrieval large             # 500 queries (needs app.ingest large first)
 python -m benchmarks.retrieval medium --queries=50
 ```
 
@@ -344,9 +352,10 @@ langchain-support-agent-demo/
     generate_dataset.py            ← regenerates data/medium/ and data/large/
 
   benchmarks/
-    ingest.py            ← embed throughput + Qdrant write throughput
-    retrieval_latency.py ← p50/p95/p99 retrieval latency
-    sample_results.md              ← results from Nirvana Cloud
+    precompute.py        ← embed dataset once and cache vectors to disk
+    ingest.py            ← Qdrant write throughput (uses cache if available)
+    retrieval.py         ← p50/p95/p99 retrieval latency
+    sample_results.md    ← results from Nirvana Cloud
 
   infra/
     deploy_on_nirvana.md           ← step-by-step deployment guide
