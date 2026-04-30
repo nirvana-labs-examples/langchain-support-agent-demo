@@ -6,37 +6,40 @@ The app ingests product documentation, support tickets, FAQs, and internal SOPs.
 
 The demo highlights why AI agents are infrastructure-heavy workloads. Retrieval, embedding storage, metadata filtering, checkpointing, and memory all depend on fast, predictable cloud infrastructure.
 
-A self-contained semantic search service over a customer-support knowledge
-base. Built to make the case that **Nirvana Cloud is the right place to host
-stateful AI workloads**: retrieval, vector search, and the storage layer they
-depend on.
-
----
-
 ## Two paths: retrieval-only and grounded answers
 
 The demo exposes the same knowledge base through two paths:
 
 | Path | Endpoint | Uses LLM? | Used by |
 |------|----------|-----------|---------|
-| **Retrieval-only** | `POST /search`, `python -m app.search` | No | Benchmarks — measures Nirvana CPU + storage |
+| **Retrieval-only** | `POST /search`, `python -m app.search` | No | Benchmarks — isolates storage performance |
 | **Grounded answer** | `POST /ask`, `python -m app.ask`         | Yes (Ollama by default, OpenAI optional) | Full agent demo |
 
-The benchmarks deliberately use the retrieval-only path. Most AI demos call
-out to an external LLM provider for embeddings *and* generation, and **>95% of every benchmark
-measurement becomes network latency** — the numbers don't reflect
-the host infrastructure at all. By keeping the timed path local, every
-millisecond reflects Nirvana's CPU and storage:
+### What this demo actually measures
 
-1. Embed the user's query with a local model (CPU)
-2. Run a similarity search against Qdrant's HNSW index (CPU + disk)
-3. Return the top-K matching document chunks with relevance scores
+Most AI demos use an external embedding API (OpenAI, Cohere, etc.) for both
+ingestion and query embedding. When you benchmark those setups, **>95% of every
+measurement is network latency to the embedding provider** — the numbers say
+nothing about your infrastructure.
+
+This demo is built to show what happens *after* the embedding call returns:
+vector storage, HNSW index construction, and similarity search. That's the
+part that runs on your infrastructure, and the part where Nirvana ABS makes a
+measurable difference.
+
+To isolate that layer, embeddings are pre-computed and shipped with the repo
+(`data/.cache/`). Ingest loads vectors directly from cache and writes them to
+Qdrant — no embedding API, no network calls, pure disk I/O. The retrieval
+benchmark pre-embeds all queries in a batch before the timer starts, so
+measured latency is the Qdrant HNSW search alone.
+
+The result: every millisecond in the benchmark reflects Nirvana's storage
+performance, not your internet connection.
 
 The `app.ask` path layers an LLM on top of those same retrieved chunks to
-produce a structured answer (policy summary, recommended response,
-citations, escalation flag). It runs against a local Ollama model by
-default — still no external APIs required — or against OpenAI if you set a
-key.
+produce a structured answer (policy summary, recommended response, citations,
+escalation flag). It runs against a local Ollama model by default — still no
+external APIs required — or against OpenAI if you set a key.
 
 ---
 

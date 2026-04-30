@@ -12,7 +12,6 @@ import pandas as pd
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 from rich.console import Console
@@ -146,7 +145,6 @@ def ingest(dataset: str, recreate: bool = False) -> int:
         console.print(f"  Loaded [cyan]{len(vectors)}[/cyan] vectors from cache")
 
         console.print("\n[bold]Step 5: Storing vectors[/bold]")
-        _BATCH_SIZE = 512
         points = [
             PointStruct(id=i, vector=vec, payload=payload)
             for i, (vec, payload) in enumerate(zip(vectors, payloads))
@@ -158,10 +156,10 @@ def ingest(dataset: str, recreate: bool = False) -> int:
             console=console,
         ) as progress:
             task = progress.add_task(f"Upserting {len(points)} vectors...", total=None)
-            for batch_start in range(0, len(points), _BATCH_SIZE):
+            for batch_start in range(0, len(points), 512):
                 _ = client.upsert(
                     collection_name=collection_name,
-                    points=points[batch_start : batch_start + _BATCH_SIZE],
+                    points=points[batch_start : batch_start + 512],
                     wait=True,
                 )
             progress.update(task, description=f"Upserted {len(points)} vectors")
@@ -171,22 +169,30 @@ def ingest(dataset: str, recreate: bool = False) -> int:
         console.print(f"  Loaded [cyan]{settings.embedding_model}[/cyan] ({settings.embedding_dimensions} dims)")
 
         console.print("\n[bold]Step 5: Embedding and storing vectors[/bold]")
-        qdrant_url = f"http://{settings.qdrant_host}:{settings.qdrant_port}"
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            _ = progress.add_task(f"Embedding and indexing {len(chunks)} chunks...", total=None)
-            _ = QdrantVectorStore.from_documents(
-                documents=chunks,
-                embedding=embeddings,
-                collection_name=collection_name,
-                url=qdrant_url,
-                force_recreate=False,
-                content_payload_key="text",
-            )
+            task = progress.add_task(f"Embedding {len(chunks)} chunks...", total=None)
+            raw_vectors = embeddings.embed_documents([c.page_content for c in chunks])
+            progress.update(task, description=f"Upserting {len(chunks)} vectors...")
+            payloads: list[dict[str, object]] = [
+                {"text": chunk.page_content, **chunk.metadata}
+                for chunk in chunks
+            ]
+            points = [
+                PointStruct(id=i, vector=vec, payload=payload)
+                for i, (vec, payload) in enumerate(zip(raw_vectors, payloads))
+            ]
+            for batch_start in range(0, len(points), 512):
+                _ = client.upsert(
+                    collection_name=collection_name,
+                    points=points[batch_start : batch_start + 512],
+                    wait=True,
+                )
+            progress.update(task, description=f"Upserted {len(chunks)} vectors")
 
     console.print(f"\n[bold green]Ingest complete![/bold green] {len(chunks)} chunks stored in '{collection_name}'.")
     console.rule()
