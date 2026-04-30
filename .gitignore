@@ -11,6 +11,11 @@ build/
 # Qdrant local storage (when running without Docker volume)
 qdrant_storage/
 
+# Dataset directories — stored as .zip files in git; extracted on first use
+data/small/
+data/medium/
+data/large/
+
 # Editors
 .vscode/
 .idea/

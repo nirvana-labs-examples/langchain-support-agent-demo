@@ -27,6 +27,7 @@ from rich.console import Console
 from rich.table import Table
 
 from app.config import settings
+from app.ingest import ensure_extracted
 from app.retriever import get_embeddings
 
 console = Console()
@@ -90,6 +91,7 @@ _KB_QUERIES: list[str] = [
 
 
 def _load_ticket_subjects(dataset: str, n: int) -> list[str]:
+    ensure_extracted(dataset)
     csv_path = _ROOT / "data" / dataset / "sample_tickets.csv"
     subjects: list[str] = []
     with csv_path.open(encoding="utf-8") as f:

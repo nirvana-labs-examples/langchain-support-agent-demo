@@ -7,6 +7,7 @@ Qdrant instance. No external API calls, no API keys.
 """
 
 import sys
+import zipfile
 from pathlib import Path
 import pandas as pd
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -29,11 +30,28 @@ def _data_dir(dataset: str) -> Path:
     return _REPO_ROOT / "data" / dataset
 
 
+def ensure_extracted(dataset: str) -> None:
+    """Extract data/{dataset}.zip into data/ if the directory doesn't exist yet."""
+    data_dir = _data_dir(dataset)
+    if data_dir.exists():
+        return
+    zip_path = _REPO_ROOT / "data" / f"{dataset}.zip"
+    if not zip_path.exists():
+        raise FileNotFoundError(
+            f"Dataset '{dataset}' not found. Expected {data_dir} or {zip_path}. Run 'python -m scripts.generate_dataset {dataset}' to generate it."
+        )
+    console.print(f"  [dim]Extracting {zip_path.name}...[/dim]")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(_REPO_ROOT / "data")
+    console.print(f"  [green]Extracted[/green] {dataset} dataset to {data_dir}")
+
+
 def _collection_name(dataset: str) -> str:
     return f"{settings.qdrant_collection_name}_{dataset}"
 
 
 def load_markdown_files(dataset: str) -> list[Document]:
+    ensure_extracted(dataset)
     data_dir = _data_dir(dataset)
     docs = []
     for path in sorted(data_dir.glob("**/*.md")):
@@ -51,6 +69,7 @@ def load_markdown_files(dataset: str) -> list[Document]:
 
 
 def load_csv_tickets(dataset: str) -> list[Document]:
+    ensure_extracted(dataset)
     data_dir = _data_dir(dataset)
     csv_path = data_dir / "sample_tickets.csv"
     df = pd.read_csv(csv_path)
