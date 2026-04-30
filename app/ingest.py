@@ -128,25 +128,18 @@ def ensure_collection(client: QdrantClient, collection_name: str) -> None:
         console.print(f"  [blue]Collection[/blue] '{collection_name}' already exists")
 
 
-def ingest(dataset: str, recreate: bool = False) -> int:
+def ingest(dataset: str, recreate: bool = False, nocache: bool = False) -> int:
     """
     Full ingest pipeline for the given dataset. Returns the number of chunks stored.
 
-    Args:
-        dataset:  "small" or "medium"
-        recreate: If True, drops and recreates the collection before ingesting.
+    If pre-computed embeddings are cached (data/.cache/), load them directly and
+    skip extraction, loading, chunking, and embedding entirely. Pass nocache=True
+    to force the full pipeline regardless.
     """
     collection_name = _collection_name(dataset)
     console.rule(f"[bold magenta]Nirvana Support Agent — Ingest Pipeline ({dataset})[/bold magenta]")
 
-    console.print("\n[bold]Step 1: Loading documents[/bold]")
-    docs = load_markdown_files(dataset) + load_csv_tickets(dataset)
-    console.print(f"  Total documents loaded: [bold]{len(docs)}[/bold]")
-
-    console.print("\n[bold]Step 2: Chunking[/bold]")
-    chunks = chunk_documents(docs)
-
-    console.print("\n[bold]Step 3: Connecting to Qdrant[/bold]")
+    console.print("\n[bold]Step 1: Connecting to Qdrant[/bold]")
     client = get_qdrant_client()
     console.print(f"  Connected to Qdrant at [cyan]{settings.qdrant_host}:{settings.qdrant_port}[/cyan]")
 
@@ -158,12 +151,13 @@ def ingest(dataset: str, recreate: bool = False) -> int:
 
     ensure_collection(client, collection_name)
 
-    if is_cached(dataset):
-        console.print("\n[bold]Step 4: Loading pre-computed embeddings from cache[/bold]")
+    if not nocache and is_cached(dataset):
+        console.print("\n[bold]Step 2: Loading pre-computed embeddings from cache[/bold]")
         vectors, payloads = load_cache(dataset)
-        console.print(f"  Loaded [cyan]{len(vectors)}[/cyan] vectors from cache")
+        num_chunks = len(vectors)
+        console.print(f"  Loaded [cyan]{num_chunks}[/cyan] vectors from cache")
 
-        console.print("\n[bold]Step 5: Storing vectors[/bold]")
+        console.print("\n[bold]Step 3: Storing vectors[/bold]")
         points = [
             PointStruct(id=i, vector=vec, payload=payload)
             for i, (vec, payload) in enumerate(zip(vectors, payloads))
@@ -174,15 +168,26 @@ def ingest(dataset: str, recreate: bool = False) -> int:
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task(f"Upserting {len(points)} vectors...", total=None)
+            task = progress.add_task(f"Upserting {num_chunks} vectors...", total=None)
             for batch_start in range(0, len(points), 512):
                 _ = client.upsert(
                     collection_name=collection_name,
                     points=points[batch_start : batch_start + 512],
                     wait=True,
                 )
-            progress.update(task, description=f"Upserted {len(points)} vectors")
+            progress.update(task, description=f"Upserted {num_chunks} vectors")
     else:
+        if nocache:
+            console.print("\n[dim]--nocache: skipping cache, running full pipeline[/dim]")
+
+        console.print("\n[bold]Step 2: Loading documents[/bold]")
+        docs = load_markdown_files(dataset) + load_csv_tickets(dataset)
+        console.print(f"  Total documents loaded: [bold]{len(docs)}[/bold]")
+
+        console.print("\n[bold]Step 3: Chunking[/bold]")
+        chunks = chunk_documents(docs)
+        num_chunks = len(chunks)
+
         console.print("\n[bold]Step 4: Loading embedding model[/bold]")
         embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model)
         console.print(f"  Loaded [cyan]{settings.embedding_model}[/cyan] ({settings.embedding_dimensions} dims)")
@@ -194,9 +199,9 @@ def ingest(dataset: str, recreate: bool = False) -> int:
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task(f"Embedding {len(chunks)} chunks...", total=None)
+            task = progress.add_task(f"Embedding {num_chunks} chunks...", total=None)
             raw_vectors = embeddings.embed_documents([c.page_content for c in chunks])
-            progress.update(task, description=f"Upserting {len(chunks)} vectors...")
+            progress.update(task, description=f"Upserting {num_chunks} vectors...")
             payloads: list[dict[str, object]] = [
                 {"text": chunk.page_content, **chunk.metadata}
                 for chunk in chunks
@@ -211,25 +216,28 @@ def ingest(dataset: str, recreate: bool = False) -> int:
                     points=points[batch_start : batch_start + 512],
                     wait=True,
                 )
-            progress.update(task, description=f"Upserted {len(chunks)} vectors")
+            progress.update(task, description=f"Upserted {num_chunks} vectors")
 
-    console.print(f"\n[bold green]Ingest complete![/bold green] {len(chunks)} chunks stored in '{collection_name}'.")
+    console.print(f"\n[bold green]Ingest complete![/bold green] {num_chunks} chunks stored in '{collection_name}'.")
     console.rule()
-    return len(chunks)
+    return num_chunks
 
 
-def _parse_args() -> tuple[str, bool]:
+def _parse_args() -> tuple[str, bool, bool]:
     args = sys.argv[1:]
     dataset: str = settings.dataset
     recreate = False
+    nocache = False
     for arg in args:
         if arg in ("small", "medium", "large"):
             dataset = arg
         elif arg == "--recreate":
             recreate = True
-    return dataset, recreate
+        elif arg == "--nocache":
+            nocache = True
+    return dataset, recreate, nocache
 
 
 if __name__ == "__main__":
-    _dataset, _recreate = _parse_args()
-    _ = ingest(dataset=_dataset, recreate=_recreate)
+    _dataset, _recreate, _nocache = _parse_args()
+    _ = ingest(dataset=_dataset, recreate=_recreate, nocache=_nocache)

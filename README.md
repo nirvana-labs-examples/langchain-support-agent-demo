@@ -166,7 +166,13 @@ python -m app.ingest small    # ingest the small dataset explicitly
 python -m app.ingest medium   # ingest the medium dataset explicitly
 python -m app.ingest large    # ingest the large dataset explicitly
 python -m app.ingest --recreate  # drop and rebuild the collection
+python -m app.ingest --nocache   # skip pre-computed cache, embed from scratch
 ```
+
+By default, ingest loads vectors from `data/.cache/` and writes them directly
+to Qdrant — no embedding step, just disk I/O. Use `--nocache` to run the full
+pipeline (extract → chunk → embed → store), for example after changing the
+embedding model or chunk settings.
 
 Each dataset uses its own Qdrant collection (`support_docs_small`,
 `support_docs_medium`, `support_docs_large`) so they coexist without conflicts.
