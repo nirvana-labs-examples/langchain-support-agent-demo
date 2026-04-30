@@ -12,6 +12,7 @@ Ollama: uses a concrete JSON template in the prompt — small models understand
 import json
 import re
 import time
+from dataclasses import dataclass
 from typing import cast
 
 from langchain_core.documents import Document
@@ -20,7 +21,18 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.llm import get_llm
-from app.retriever import get_vector_store
+from app.retriever import get_embeddings, search_by_vector
+
+
+@dataclass
+class LatencyBreakdown:
+    embed_ms: float
+    search_ms: float
+    generate_ms: float
+
+    @property
+    def total_ms(self) -> float:
+        return self.embed_ms + self.search_ms + self.generate_ms
 
 
 class Citation(BaseModel):
@@ -128,18 +140,21 @@ def _parse_json(raw: str, hits: list[tuple[Document, float]]) -> SupportAnswer:
     )
 
 
-def answer(question: str) -> tuple[SupportAnswer, float]:
-    """Run the full retrieve → generate → parse pipeline. Returns (answer, latency_ms)."""
-    start = time.perf_counter()
+def answer(question: str) -> tuple[SupportAnswer, LatencyBreakdown]:
+    """Run the full retrieve → generate → parse pipeline. Returns (answer, latency_breakdown)."""
+    t0 = time.perf_counter()
+    vec = get_embeddings().embed_query(question)
+    embed_ms = (time.perf_counter() - t0) * 1000
 
-    vector_store = get_vector_store()
-    hits: list[tuple[Document, float]] = vector_store.similarity_search_with_score(
-        query=question, k=settings.retriever_top_k
-    )
+    t1 = time.perf_counter()
+    hits = search_by_vector(vec, settings.retriever_top_k)
+    search_ms = (time.perf_counter() - t1) * 1000
+
     context = format_context(hits)
     messages = _build_messages(question, context)
     llm = get_llm()
 
+    t2 = time.perf_counter()
     if settings.llm_provider == "openai":
         try:
             result = llm.with_structured_output(SupportAnswer).invoke(messages)
@@ -152,6 +167,6 @@ def answer(question: str) -> tuple[SupportAnswer, float]:
         raw_msg = llm.invoke(messages)
         raw_text = raw_msg.content if isinstance(raw_msg.content, str) else str(raw_msg.content)
         parsed = _parse_json(raw_text, hits)
+    generate_ms = (time.perf_counter() - t2) * 1000
 
-    latency_ms = (time.perf_counter() - start) * 1000
-    return parsed, latency_ms
+    return parsed, LatencyBreakdown(embed_ms=embed_ms, search_ms=search_ms, generate_ms=generate_ms)

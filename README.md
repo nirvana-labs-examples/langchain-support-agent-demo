@@ -278,9 +278,9 @@ For grounded answers (via `python -m app.ask "..."`), try:
 Both benchmarks accept an optional dataset argument and default to `medium`.
 
 **Ingest benchmark** — standalone, no prior setup needed. Pre-computed embeddings
-for all three datasets are included in the repo (`benchmarks/.cache/`), so the
-benchmark skips the CPU-bound embedding step and measures only Qdrant write
-throughput (disk I/O).
+for all three datasets are included in the repo (`data/.cache/`), so both
+`app.ingest` and the benchmark skip the CPU-bound embedding step and measure
+only Qdrant write throughput (disk I/O).
 
 ```bash
 python -m benchmarks.ingest             # medium (default)
@@ -292,11 +292,14 @@ If you change the dataset or chunking settings and need to regenerate the cache:
 
 ```bash
 python -m benchmarks.precompute         # regenerate for medium
+python -m benchmarks.precompute small
 python -m benchmarks.precompute large
 ```
 
 **Retrieval benchmark** — requires the dataset's Qdrant collection to exist.
-Run `python -m app.ingest <dataset>` once to populate it.
+Run `python -m app.ingest <dataset>` once to populate it. Queries are
+pre-embedded in a batch before the timer starts, so CPU embedding time is
+excluded — numbers reflect only Qdrant HNSW search (disk I/O).
 
 ```bash
 python -m app.ingest medium                      # one-time setup
@@ -308,7 +311,7 @@ python -m benchmarks.retrieval medium --queries=50
 See `benchmarks/sample_results.md` for results collected on Nirvana Cloud.
 
 Both benchmarks run **entirely on the host** — no external API calls. The
-numbers reflect Nirvana's CPU and storage performance directly.
+numbers reflect Nirvana's storage performance directly.
 
 ---
 
@@ -347,13 +350,14 @@ langchain-support-agent-demo/
     small/                         ← 24 KB — 5 articles + 20 tickets
     medium/                        ← 10 MB — 57 articles + 46 K tickets
     large/                         ← 104 MB — 57 articles + 470 K tickets
+    .cache/                        ← pre-computed embeddings (committed; used by app.ingest + benchmarks)
 
   scripts/
     generate_dataset.py            ← regenerates data/medium/ and data/large/
 
   benchmarks/
-    precompute.py        ← embed dataset once and cache vectors to disk
-    ingest.py            ← Qdrant write throughput (uses cache if available)
+    precompute.py        ← embed dataset once and save to data/.cache/
+    ingest.py            ← Qdrant write throughput (uses data/.cache/)
     retrieval.py         ← p50/p95/p99 retrieval latency
     sample_results.md    ← results from Nirvana Cloud
 

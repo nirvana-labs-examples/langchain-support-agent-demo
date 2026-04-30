@@ -12,9 +12,11 @@ the Nirvana VM and is bound by CPU + storage I/O.
 
 from functools import lru_cache
 
+from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain.schema import BaseRetriever
+from qdrant_client import QdrantClient
 
 from app.config import settings
 
@@ -22,6 +24,11 @@ from app.config import settings
 @lru_cache(maxsize=1)
 def get_embeddings() -> HuggingFaceEmbeddings:
     return HuggingFaceEmbeddings(model_name=settings.embedding_model)
+
+
+@lru_cache(maxsize=1)
+def get_qdrant_client() -> QdrantClient:
+    return QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
 
 
 @lru_cache(maxsize=1)
@@ -39,7 +46,20 @@ def get_vector_store() -> QdrantVectorStore:
         embedding=get_embeddings(),
         collection_name=collection_name,
         url=url,
+        content_payload_key="text",
     )
+
+
+def search_by_vector(vec: list[float], k: int) -> list[tuple[Document, float]]:
+    """Run a raw Qdrant vector search and return (Document, score) pairs."""
+    collection = f"{settings.qdrant_collection_name}_{settings.dataset}"
+    hits = get_qdrant_client().search(collection_name=collection, query_vector=vec, limit=k)
+    results: list[tuple[Document, float]] = []
+    for hit in hits:
+        payload: dict[str, object] = hit.payload or {}
+        text = str(payload.pop("text", ""))
+        results.append((Document(page_content=text, metadata=payload), hit.score))
+    return results
 
 
 def get_retriever() -> BaseRetriever:

@@ -19,7 +19,7 @@ from qdrant_client import QdrantClient
 from app.answer import SupportAnswer, answer
 from app.config import settings
 from app.llm import llm_label
-from app.retriever import get_vector_store
+from app.retriever import get_embeddings, get_vector_store, search_by_vector
 
 
 class SearchRequest(BaseModel):
@@ -42,6 +42,8 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     results: list[SearchResult]
+    embed_ms: float
+    search_ms: float
     latency_ms: float
     embedding_model: str
 
@@ -93,6 +95,9 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     question: str
     answer: SupportAnswer
+    embed_ms: float
+    search_ms: float
+    generate_ms: float
     latency_ms: float
     llm: str
 
@@ -136,16 +141,16 @@ def search(request: SearchRequest):
     Returns the top-K most relevant chunks with similarity scores and source
     metadata. Latency includes local query embedding + Qdrant HNSW search.
     """
-    start = time.perf_counter()
     try:
-        vector_store = get_vector_store()
-        hits = vector_store.similarity_search_with_score(
-            query=request.query,
-            k=request.top_k,
-        )
+        t0 = time.perf_counter()
+        vec = get_embeddings().embed_query(request.query)
+        embed_ms = (time.perf_counter() - t0) * 1000
+
+        t1 = time.perf_counter()
+        hits = search_by_vector(vec, request.top_k)
+        search_ms = (time.perf_counter() - t1) * 1000
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    latency_ms = (time.perf_counter() - start) * 1000
 
     results = [
         SearchResult(
@@ -160,7 +165,9 @@ def search(request: SearchRequest):
     return SearchResponse(
         query=request.query,
         results=results,
-        latency_ms=round(latency_ms, 2),
+        embed_ms=round(embed_ms, 2),
+        search_ms=round(search_ms, 2),
+        latency_ms=round(embed_ms + search_ms, 2),
         embedding_model=settings.embedding_model,
     )
 
@@ -176,13 +183,16 @@ def ask(request: AskRequest):
     escalation flag).
     """
     try:
-        result, latency_ms = answer(request.question)
+        result, latency = answer(request.question)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
     return AskResponse(
         question=request.question,
         answer=result,
-        latency_ms=round(latency_ms, 2),
+        embed_ms=round(latency.embed_ms, 2),
+        search_ms=round(latency.search_ms, 2),
+        generate_ms=round(latency.generate_ms, 2),
+        latency_ms=round(latency.total_ms, 2),
         llm=llm_label(),
     )

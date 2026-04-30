@@ -1,22 +1,18 @@
 """
 Benchmark: retrieval latency (p50 / p95 / p99).
 
-Fires N retrieval queries against the live Qdrant collection and measures
-end-to-end latency including:
-  - Query embedding (local sentence-transformers on CPU, ~25-50ms)
+Embeds all query texts upfront in a single batch (outside the timer), then
+fires raw Qdrant vector searches and measures only the HNSW disk-read phase:
   - Qdrant HNSW similarity search + disk reads (~2-5ms on ABS)
 
-Both steps run on the Nirvana VM. Every millisecond reflects local
-compute and storage — no external API variance.
-
-Queries are sampled from real ticket subjects in the dataset (plus a small
-set of knowledge-base questions), so the mix scales with dataset size.
+This isolates storage I/O from CPU embedding time so the numbers reflect
+Nirvana ABS performance directly.
 
 Run:
   python -m benchmarks.retrieval           # uses medium
   python -m benchmarks.retrieval small
   python -m benchmarks.retrieval large
-  python -m benchmarks.retrieval medium --queries 200
+  python -m benchmarks.retrieval medium --queries=200
 """
 
 import csv
@@ -26,11 +22,12 @@ import sys
 from pathlib import Path
 import time
 
+from qdrant_client import QdrantClient
 from rich.console import Console
 from rich.table import Table
 
 from app.config import settings
-from app.retriever import get_retriever
+from app.retriever import get_embeddings
 
 console = Console()
 
@@ -121,14 +118,23 @@ def percentile(data: list[float], p: float) -> float:
     return sorted_data[lo] + (sorted_data[hi] - sorted_data[lo]) * (idx - lo)
 
 
-def measure_latencies(queries: list[str]) -> list[float]:
-    retriever = get_retriever()
+def embed_queries(queries: list[str]) -> list[list[float]]:
+    console.print(f"\n[dim]Embedding {len(queries)} queries (excluded from latency timer)...[/dim]")
+    embeddings = get_embeddings()
+    vectors = embeddings.embed_documents(queries)
+    console.print(f"  [dim]Done.[/dim]")
+    return vectors
+
+
+def measure_latencies(query_vectors: list[list[float]]) -> list[float]:
+    client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+    collection = f"{settings.qdrant_collection_name}_{settings.dataset}"
     latencies: list[float] = []
 
-    console.print(f"\nRunning [cyan]{len(queries)}[/cyan] retrieval queries...")
-    for query in queries:
+    console.print(f"\nRunning [cyan]{len(query_vectors)}[/cyan] vector searches (Qdrant only, embedding excluded)...")
+    for vec in query_vectors:
         t0 = time.perf_counter()
-        _ = retriever.invoke(query)
+        _ = client.search(collection_name=collection, query_vector=vec, limit=settings.retriever_top_k)
         latencies.append((time.perf_counter() - t0) * 1000)
     console.print("  Done.")
 
@@ -136,8 +142,6 @@ def measure_latencies(queries: list[str]) -> list[float]:
 
 
 def _check_collection_exists() -> None:
-    from qdrant_client import QdrantClient
-
     client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
     collection = f"{settings.qdrant_collection_name}_{settings.dataset}"
     existing = [c.name for c in client.get_collections().collections]
@@ -154,7 +158,8 @@ def run_retrieval_benchmark(num_queries: int) -> None:
     console.print(f"\nBuilding query list ({num_queries} queries from KB articles + ticket subjects)...")
     queries = _build_query_list(num_queries)
 
-    latencies = measure_latencies(queries)
+    query_vectors = embed_queries(queries)
+    latencies = measure_latencies(query_vectors)
 
     p50 = statistics.median(latencies)
     p95 = percentile(latencies, 95)
@@ -177,7 +182,7 @@ def run_retrieval_benchmark(num_queries: int) -> None:
 
     console.print()
     console.print(table)
-    console.print("\n[dim]Latency breakdown: ~25-50ms local CPU embedding + ~2-5ms Qdrant HNSW search. Both run on the Nirvana VM. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS (Accelerated Block Storage) is most pronounced.[/dim]")
+    console.print("\n[dim]Latency is Qdrant HNSW search only — query embedding is done upfront and excluded from the timer. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS (Accelerated Block Storage) is most pronounced.[/dim]")
 
 
 _DEFAULT_QUERIES = {"small": 20, "medium": 200, "large": 500}

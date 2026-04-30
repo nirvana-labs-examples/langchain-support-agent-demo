@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 from rich.console import Console
 
 from app.config import settings
-from app.retriever import get_vector_store
+from app.retriever import get_embeddings, get_qdrant_client, search_by_vector
 
 console = Console()
 
@@ -27,9 +27,10 @@ def format_excerpt(text: str, width: int = 70, max_lines: int = 4) -> str:
     return "\n     ".join(wrapped)
 
 
-def print_results(_query: str, hits: list[tuple[Document, float]], latency_ms: float, _top_k: int) -> None:
+def print_results(_query: str, hits: list[tuple[Document, float]], embed_ms: float, search_ms: float, _top_k: int) -> None:
     n = len(hits)
-    console.print(f"\n  [bold]Results ({n})[/bold]{' ' * (47 - len(str(n)))}[dim]{latency_ms:.0f}ms[/dim]\n")
+    timing = f"embed [cyan]{embed_ms:.0f}ms[/cyan] · search [cyan]{search_ms:.0f}ms[/cyan] · total [cyan]{embed_ms + search_ms:.0f}ms[/cyan]"
+    console.print(f"\n  [bold]Results ({n})[/bold]  [dim]{timing}[/dim]\n")
     for i, (doc, score) in enumerate(hits, start=1):
         metadata: dict[str, object] = doc.metadata  # type: ignore[assignment]
         source = str(metadata.get("source", "unknown"))
@@ -43,7 +44,8 @@ def print_results(_query: str, hits: list[tuple[Document, float]], latency_ms: f
 def main():
     console.print("[bold magenta]Nirvana Support Search[/bold magenta] — type a question, Ctrl+C or Ctrl+D to exit\n")
     console.print("[dim]Loading embedding model and connecting to Qdrant...[/dim]")
-    vector_store = get_vector_store()
+    _ = get_embeddings()
+    _ = get_qdrant_client()
     console.print(
         f"[dim]Ready. Model: {settings.embedding_model} ({settings.embedding_dimensions} dims).[/dim]\n"
     )
@@ -59,9 +61,14 @@ def main():
             continue
 
         t0 = time.perf_counter()
-        hits = vector_store.similarity_search_with_score(query, k=settings.retriever_top_k)
-        latency_ms = (time.perf_counter() - t0) * 1000
-        print_results(query, hits, latency_ms, settings.retriever_top_k)
+        vec = get_embeddings().embed_query(query)
+        embed_ms = (time.perf_counter() - t0) * 1000
+
+        t1 = time.perf_counter()
+        hits = search_by_vector(vec, settings.retriever_top_k)
+        search_ms = (time.perf_counter() - t1) * 1000
+
+        print_results(query, hits, embed_ms, search_ms, settings.retriever_top_k)
 
 
 if __name__ == "__main__":

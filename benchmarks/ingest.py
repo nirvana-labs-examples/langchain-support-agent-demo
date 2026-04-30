@@ -24,8 +24,8 @@ from rich.console import Console
 from rich.table import Table
 
 from app.config import settings
+from app.embedding_cache import cache_key, is_cached, load_cache
 from app.ingest import load_csv_tickets, load_markdown_files
-from benchmarks.precompute import cache_key, is_cached, load_cache
 
 console = Console()
 

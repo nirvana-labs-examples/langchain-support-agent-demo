@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from app.answer import SupportAnswer, answer
+from app.answer import LatencyBreakdown, SupportAnswer, answer
 from app.config import settings
 from app.llm import llm_label
 from app.retriever import get_vector_store
@@ -33,7 +33,7 @@ def _fmt_error(e: Exception) -> str:
     return f"LLM error: {msg}"
 
 
-def render(result: SupportAnswer, latency_ms: float) -> None:
+def render(result: SupportAnswer, latency: LatencyBreakdown) -> None:
     console.print()
     console.print(Panel(result.summary, title="[bold]Policy summary[/bold]", border_style="cyan"))
     console.print(
@@ -61,7 +61,13 @@ def render(result: SupportAnswer, latency_ms: float) -> None:
     else:
         console.print("[dim]No escalation needed.[/dim]")
 
-    console.print(f"\n[dim]{latency_ms:.0f}ms · {llm_label()}[/dim]\n")
+    timing = (
+        f"embed [cyan]{latency.embed_ms:.0f}ms[/cyan] · "
+        f"search [cyan]{latency.search_ms:.0f}ms[/cyan] · "
+        f"generate [cyan]{latency.generate_ms:.0f}ms[/cyan] · "
+        f"total [cyan]{latency.total_ms:.0f}ms[/cyan]"
+    )
+    console.print(f"\n[dim]{timing} · {llm_label()}[/dim]\n")
 
 
 def warm_up() -> None:
@@ -81,11 +87,11 @@ def main() -> None:
         warm_up()
         console.print(f"[bold green]>[/bold green] {question}")
         try:
-            result, latency_ms = answer(question)
+            result, latency = answer(question)
         except Exception as e:
             console.print(f"[red]{_fmt_error(e)}[/red]")
             return
-        render(result, latency_ms)
+        render(result, latency)
         return
 
     console.print(
@@ -104,12 +110,12 @@ def main() -> None:
             continue
 
         try:
-            result, latency_ms = answer(question)
+            result, latency = answer(question)
         except Exception as e:
             console.print(f"[red]{_fmt_error(e)}[/red]")
             continue
 
-        render(result, latency_ms)
+        render(result, latency)
 
 
 if __name__ == "__main__":
