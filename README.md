@@ -326,9 +326,6 @@ numbers reflect Nirvana's storage performance directly.
 
 ## Deploy on Nirvana Cloud
 
-See [`infra/deploy_on_nirvana.md`](infra/deploy_on_nirvana.md) for a complete deployment guide.
-
-The short version:
 1. Create a VM (`standard-4` or higher)
 2. Attach an ABS volume and mount it at `/data/qdrant`
 3. Bind the Docker `qdrant_storage` volume to `/data/qdrant`
@@ -369,10 +366,6 @@ langchain-support-agent-demo/
     ingest.py            ← Qdrant write throughput (uses data/.cache/)
     retrieval.py         ← p50/p95/p99 retrieval latency
     sample_results.md    ← results from Nirvana Cloud
-
-  infra/
-    deploy_on_nirvana.md           ← step-by-step deployment guide
-    volume_setup.md                ← ABS volume sizing and backup
 ```
 
 ---
