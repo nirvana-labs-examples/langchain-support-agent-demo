@@ -13,6 +13,7 @@ Run:
   python -m benchmarks.ingest_benchmark large
 """
 
+import statistics
 import sys
 import time
 
@@ -29,6 +30,14 @@ from app.ingest import load_csv_tickets, load_markdown_files
 console = Console()
 
 BENCH_COLLECTION = "benchmark_ingest"
+
+
+def _percentile(data: list[float], p: float) -> float:
+    sorted_data = sorted(data)
+    idx = (len(sorted_data) - 1) * p / 100
+    lo = int(idx)
+    hi = min(lo + 1, len(sorted_data) - 1)
+    return sorted_data[lo] + (sorted_data[hi] - sorted_data[lo]) * (idx - lo)
 
 
 def run_ingest_benchmark() -> None:
@@ -80,13 +89,16 @@ def run_ingest_benchmark() -> None:
         )
         for i, (vec, chunk) in enumerate(zip(vectors, chunks))
     ]
+    batch_latencies_ms: list[float] = []
     t_write_start = time.perf_counter()
     for batch_start in range(0, len(points), BATCH_SIZE):
+        t_batch = time.perf_counter()
         _ = client.upsert(
             collection_name=BENCH_COLLECTION,
             points=points[batch_start : batch_start + BATCH_SIZE],
             wait=True,
         )
+        batch_latencies_ms.append((time.perf_counter() - t_batch) * 1000)
     write_time = time.perf_counter() - t_write_start
     write_throughput = len(chunks) / write_time
     console.print(f"  Done in [green]{write_time:.2f}s[/green] ([cyan]{write_throughput:.0f}[/cyan] vectors/sec)")
@@ -104,13 +116,17 @@ def run_ingest_benchmark() -> None:
     table.add_row("Embedding throughput", f"{embed_throughput:.1f} chunks/sec")
     table.add_row("Qdrant write time", f"{write_time:.2f}s")
     table.add_row("Qdrant write throughput", f"{write_throughput:.0f} vectors/sec")
+    table.add_row("Write batches", str(len(batch_latencies_ms)))
+    table.add_row("Batch latency p50", f"{statistics.median(batch_latencies_ms):.0f} ms")
+    table.add_row("Batch latency p95", f"{_percentile(batch_latencies_ms, 95):.0f} ms")
+    table.add_row("Batch latency p99", f"{_percentile(batch_latencies_ms, 99):.0f} ms")
     table.add_row("Total time", f"{total_time:.2f}s")
     table.add_row("Embedding model", settings.embedding_model)
     table.add_row("Vector dimensions", str(settings.embedding_dimensions))
 
     console.print()
     console.print(table)
-    console.print("\n[dim]Embedding is CPU-bound — scales with vCPU count and clock speed.\nQdrant write is disk-I/O-bound — scales with NVMe IOPS. Both run entirely on the Nirvana VM.[/dim]")
+    console.print("\n[dim]Embedding is CPU-bound — scales with vCPU count and clock speed.\nQdrant write is disk-I/O-bound — scales with ABS IOPS. Both run entirely on the Nirvana VM.[/dim]")
 
 
 if __name__ == "__main__":

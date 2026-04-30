@@ -1,7 +1,7 @@
 # Deploying on Nirvana Cloud
 
 This guide walks through deploying the support agent on a Nirvana Cloud VM
-with Qdrant backed by Nirvana ABS (Attached Block Storage).
+with Qdrant backed by Nirvana ABS (Accelerated Block Storage).
 
 ## Why This Architecture Matters
 
@@ -11,7 +11,7 @@ Qdrant stores its HNSW vector index on disk. The speed of that disk directly aff
 - **Query latency**: index traversal requires random reads (partially cached in RAM)
 - **Recovery time**: after a restart, Qdrant loads the full index from disk
 
-Nirvana ABS NVMe volumes provide **10,000–100,000 IOPS** and sub-millisecond
+Nirvana ABS volumes provide **10,000–100,000 IOPS** and sub-millisecond
 latency — purpose-built for stateful AI workloads like vector databases.
 
 ## Step 1: Create a VM
@@ -32,7 +32,7 @@ In the dashboard: **Storage → Volumes → Create Volume**
 
 ```
 Size: 50 GB (sufficient for up to ~8M vectors)
-Type: NVMe
+Type: ABS (Accelerated Block Storage)
 IOPS: 10,000 baseline
 ```
 
@@ -85,7 +85,7 @@ volumes:
       device: /data/qdrant
 ```
 
-This directs Qdrant to write its HNSW index directly to the NVMe volume.
+This directs Qdrant to write its HNSW index directly to the ABS volume.
 
 ## Step 6: Start Services
 

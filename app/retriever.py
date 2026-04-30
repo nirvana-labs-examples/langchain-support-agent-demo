@@ -4,7 +4,7 @@ Vector retriever: connects to self-hosted Qdrant and returns relevant chunks.
 The embedding model is loaded once into memory and reused across requests.
 At query time:
   1. Embed the user's question on local CPU (~30ms)
-  2. Run a cosine-similarity search against Qdrant's HNSW index (~3ms on NVMe)
+  2. Run a cosine-similarity search against Qdrant's HNSW index (~3ms on ABS)
 
 No external APIs. No network round-trips. The full retrieval path runs on
 the Nirvana VM and is bound by CPU + storage I/O.

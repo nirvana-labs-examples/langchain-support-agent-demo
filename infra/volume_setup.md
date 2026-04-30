@@ -6,7 +6,7 @@ Qdrant persists its HNSW vector index in the directory pointed to by
 `storage.storage_path` (default: `./storage`). This is mapped to the Docker
 volume `qdrant_storage` in `docker-compose.yml`.
 
-By binding that volume to a Nirvana ABS NVMe volume, Qdrant gets direct access
+By binding that volume to a Nirvana ABS (Accelerated Block Storage) volume, Qdrant gets direct access
 to high-IOPS, low-latency block storage — the same storage layer that makes
 Nirvana Cloud well-suited for production AI agent workloads.
 
@@ -35,7 +35,7 @@ graph edges. 1 million vectors ≈ 6 GB on disk.
 1. Navigate to **Storage → Volumes → Create Volume**
 2. Set name: `qdrant-data`
 3. Set size: 50 GB (adjust per sizing guide above)
-4. Set type: NVMe
+4. Set type: ABS
 5. Click **Create**
 6. Navigate to your VM → **Attached Volumes → Attach** → select `qdrant-data`
 

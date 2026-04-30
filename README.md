@@ -1,8 +1,10 @@
-# Nirvana Cloud — Semantic Support Search Demo
+# LangChain Customer Support Agent on Nirvana Cloud
 
-> **AI workloads are infrastructure-heavy.**
-> This demo runs an entire semantic search stack — embedding model + vector
-> database — on a single Nirvana Cloud VM. No external APIs, no API keys.
+This demo shows how to build a production-style customer support AI agent using LangChain, a vector database, and Nirvana Cloud.
+
+The app ingests product documentation, support tickets, FAQs, and internal SOPs. Support reps can then ask questions, summarize customer issues, and draft grounded responses using retrieval-augmented generation.
+
+The demo highlights why AI agents are infrastructure-heavy workloads. Retrieval, embedding storage, metadata filtering, checkpointing, and memory all depend on fast, predictable cloud infrastructure.
 
 A self-contained semantic search service over a customer-support knowledge
 base. Built to make the case that **Nirvana Cloud is the right place to host
@@ -21,8 +23,8 @@ The demo exposes the same knowledge base through two paths:
 | **Grounded answer** | `POST /ask`, `python -m app.ask`         | Yes (Ollama by default, OpenAI optional) | Full agent demo |
 
 The benchmarks deliberately use the retrieval-only path. Most AI demos call
-out to OpenAI for embeddings *and* generation, and **>95% of every benchmark
-measurement becomes network latency to OpenAI** — the numbers don't reflect
+out to an external LLM provider for embeddings *and* generation, and **>95% of every benchmark
+measurement becomes network latency** — the numbers don't reflect
 the host infrastructure at all. By keeping the timed path local, every
 millisecond reflects Nirvana's CPU and storage:
 
@@ -61,7 +63,7 @@ key.
 └─────────────────────┬───────────────────────────────┘
                       │  index stored on
 ┌─────────────────────▼───────────────────────────────┐
-│       Nirvana Cloud VM + ABS NVMe Volume            │
+│       Nirvana Cloud VM + ABS Volume            │
 │       10,000+ IOPS, sub-millisecond latency         │
 └─────────────────────────────────────────────────────┘
 ```
@@ -291,7 +293,7 @@ See [`infra/deploy_on_nirvana.md`](infra/deploy_on_nirvana.md) for a complete de
 
 The short version:
 1. Create a VM (`standard-4` or higher)
-2. Attach an ABS NVMe volume and mount it at `/data/qdrant`
+2. Attach an ABS volume and mount it at `/data/qdrant`
 3. Bind the Docker `qdrant_storage` volume to `/data/qdrant`
 4. `docker compose up -d && python -m app.ingest && uvicorn app.main:app --host 0.0.0.0`
 

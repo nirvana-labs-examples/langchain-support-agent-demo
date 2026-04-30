@@ -4,7 +4,7 @@ Benchmark: retrieval latency (p50 / p95 / p99).
 Fires N retrieval queries against the live Qdrant collection and measures
 end-to-end latency including:
   - Query embedding (local sentence-transformers on CPU, ~25-50ms)
-  - Qdrant HNSW similarity search + disk reads (~2-5ms on NVMe)
+  - Qdrant HNSW similarity search + disk reads (~2-5ms on ABS)
 
 Both steps run on the Nirvana VM. Every millisecond reflects local
 compute and storage — no external API variance.
@@ -24,7 +24,6 @@ import random
 import statistics
 import sys
 from pathlib import Path
-from collections.abc import Iterator
 import time
 
 from rich.console import Console
@@ -114,11 +113,6 @@ def _build_query_list(num_queries: int) -> list[str]:
     return queries[:num_queries]
 
 
-def _iter_progress(queries: list[str]) -> Iterator[tuple[int, str]]:
-    for i, q in enumerate(queries, 1):
-        yield i, q
-
-
 def percentile(data: list[float], p: float) -> float:
     sorted_data = sorted(data)
     idx = (len(sorted_data) - 1) * p / 100
@@ -131,13 +125,12 @@ def measure_latencies(queries: list[str]) -> list[float]:
     retriever = get_retriever()
     latencies: list[float] = []
 
-    console.print(f"\nRunning [cyan]{len(queries)}[/cyan] retrieval queries...\n")
-    for i, query in _iter_progress(queries):
+    console.print(f"\nRunning [cyan]{len(queries)}[/cyan] retrieval queries...")
+    for query in queries:
         t0 = time.perf_counter()
         _ = retriever.invoke(query)
-        latency_ms = (time.perf_counter() - t0) * 1000
-        latencies.append(latency_ms)
-        console.print(f"  [{i:>{len(str(len(queries)))}}/{len(queries)}] {query[:60]:<60} {latency_ms:6.1f} ms")
+        latencies.append((time.perf_counter() - t0) * 1000)
+    console.print("  Done.")
 
     return latencies
 
@@ -171,7 +164,7 @@ def run_retrieval_benchmark(num_queries: int) -> None:
 
     console.print()
     console.print(table)
-    console.print("\n[dim]Latency breakdown: ~25-50ms local CPU embedding + ~2-5ms Qdrant HNSW search. Both run on the Nirvana VM. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS NVMe is most pronounced.[/dim]")
+    console.print("\n[dim]Latency breakdown: ~25-50ms local CPU embedding + ~2-5ms Qdrant HNSW search. Both run on the Nirvana VM. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS (Accelerated Block Storage) is most pronounced.[/dim]")
 
 
 _DEFAULT_QUERIES = {"small": 20, "medium": 200, "large": 500}
