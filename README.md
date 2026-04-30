@@ -100,21 +100,29 @@ Every dataset contains:
 
 ### Prerequisites
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- [uv](https://docs.astral.sh/uv/) (Python package manager — installs Python 3.11 automatically)
 - Docker + Docker Compose
 
-#### Install uv
+#### Install prerequisites
 
 **macOS**
 ```bash
 brew install uv
+brew install --cask docker   # installs Docker Desktop (includes Docker Compose)
+open -a Docker               # start Docker Desktop
 ```
 
 **Linux** (Nirvana Cloud VMs and other Linux environments)
 ```bash
+# uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env  # or restart your shell
+
+# Docker + Docker Compose
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+sudo systemctl enable docker
 ```
 
 ### 1. Clone and configure
@@ -269,15 +277,24 @@ For grounded answers (via `python -m app.ask "..."`), try:
 
 Both benchmarks accept an optional dataset argument and default to `medium`.
 
-```bash
-# Ingest throughput: chunks/sec (CPU embedding) + vectors/sec (disk write)
-python -m benchmarks.ingest_benchmark                  # medium (default)
-python -m benchmarks.ingest_benchmark large
+**Ingest benchmark** — standalone. Loads the dataset files, embeds them, and
+writes to a temporary `benchmark_ingest` collection that's deleted on exit.
+You do **not** need to run `app.ingest` first.
 
-# Retrieval latency: p50/p95/p99 over a mix of real ticket + KB queries
-python -m benchmarks.retrieval_latency_benchmark       # medium, 200 queries
-python -m benchmarks.retrieval_latency_benchmark large # 500 queries
-python -m benchmarks.retrieval_latency_benchmark medium --queries=50
+```bash
+# chunks/sec (CPU embedding) + vectors/sec (disk write)
+python -m benchmarks.ingest                  # medium (default)
+python -m benchmarks.ingest large
+```
+
+**Retrieval benchmark** — requires the dataset's collection to already exist,
+so run `python -m app.ingest <dataset>` first.
+
+```bash
+python -m app.ingest medium                            # one-time setup
+python -m benchmarks.retrieval       # medium, 200 queries
+python -m benchmarks.retrieval large # 500 queries (after ingesting large)
+python -m benchmarks.retrieval medium --queries=50
 ```
 
 See `benchmarks/sample_results.md` for results collected on Nirvana Cloud.
@@ -327,8 +344,8 @@ langchain-support-agent-demo/
     generate_dataset.py            ← regenerates data/medium/ and data/large/
 
   benchmarks/
-    ingest_benchmark.py            ← embed throughput + Qdrant write throughput
-    retrieval_latency_benchmark.py ← p50/p95/p99 retrieval latency
+    ingest.py            ← embed throughput + Qdrant write throughput
+    retrieval_latency.py ← p50/p95/p99 retrieval latency
     sample_results.md              ← results from Nirvana Cloud
 
   infra/

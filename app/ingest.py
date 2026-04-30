@@ -16,7 +16,7 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from app.config import settings
 
@@ -149,12 +149,10 @@ def ingest(dataset: str, recreate: bool = False) -> int:
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("Embedding and indexing chunks...", total=len(chunks))
+        _ = progress.add_task(f"Embedding and indexing {len(chunks)} chunks...", total=None)
         _ = QdrantVectorStore.from_documents(
             documents=chunks,
             embedding=embeddings,
@@ -162,7 +160,6 @@ def ingest(dataset: str, recreate: bool = False) -> int:
             url=qdrant_url,
             force_recreate=False,
         )
-        progress.update(task, completed=len(chunks))
 
     console.print(f"\n[bold green]Ingest complete![/bold green] {len(chunks)} chunks stored in '{collection_name}'.")
     console.rule()

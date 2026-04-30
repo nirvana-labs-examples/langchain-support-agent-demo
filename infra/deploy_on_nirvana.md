@@ -117,8 +117,8 @@ In the Nirvana Cloud dashboard, navigate to your VM's **Firewall** settings and 
 ## Step 8: Run Benchmarks
 
 ```bash
-python -m benchmarks.ingest_benchmark
-python -m benchmarks.retrieval_latency_benchmark
+python -m benchmarks.ingest
+python -m benchmarks.retrieval
 ```
 
 Compare results to `benchmarks/sample_results.md` to validate your setup.

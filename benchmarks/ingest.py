@@ -8,9 +8,9 @@ Measures end-to-end ingest time against real dataset content, broken into:
 Both steps run on the Nirvana VM. No external API calls.
 
 Run:
-  python -m benchmarks.ingest_benchmark           # uses medium dataset
-  python -m benchmarks.ingest_benchmark small
-  python -m benchmarks.ingest_benchmark large
+  python -m benchmarks.ingest           # uses medium dataset
+  python -m benchmarks.ingest small
+  python -m benchmarks.ingest large
 """
 
 import statistics

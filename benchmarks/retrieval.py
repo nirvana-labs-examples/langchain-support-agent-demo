@@ -13,10 +13,10 @@ Queries are sampled from real ticket subjects in the dataset (plus a small
 set of knowledge-base questions), so the mix scales with dataset size.
 
 Run:
-  python -m benchmarks.retrieval_latency_benchmark           # uses medium
-  python -m benchmarks.retrieval_latency_benchmark small
-  python -m benchmarks.retrieval_latency_benchmark large
-  python -m benchmarks.retrieval_latency_benchmark medium --queries 200
+  python -m benchmarks.retrieval           # uses medium
+  python -m benchmarks.retrieval small
+  python -m benchmarks.retrieval large
+  python -m benchmarks.retrieval medium --queries 200
 """
 
 import csv
@@ -135,8 +135,21 @@ def measure_latencies(queries: list[str]) -> list[float]:
     return latencies
 
 
+def _check_collection_exists() -> None:
+    from qdrant_client import QdrantClient
+
+    client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+    collection = f"{settings.qdrant_collection_name}_{settings.dataset}"
+    existing = [c.name for c in client.get_collections().collections]
+    if collection not in existing:
+        console.print(f"\n[red]Collection '{collection}' does not exist.[/red]\nRun [bold]python -m app.ingest {settings.dataset}[/bold] first to populate it.")
+        sys.exit(1)
+
+
 def run_retrieval_benchmark(num_queries: int) -> None:
     console.rule(f"[bold magenta]Retrieval Latency Benchmark — dataset: {settings.dataset}[/bold magenta]")
+
+    _check_collection_exists()
 
     console.print(f"\nBuilding query list ({num_queries} queries from KB articles + ticket subjects)...")
     queries = _build_query_list(num_queries)
