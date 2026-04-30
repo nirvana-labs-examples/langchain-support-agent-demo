@@ -1,14 +1,13 @@
 """
 Benchmark: document ingest throughput.
 
-Measures the Qdrant write phase (disk I/O bound — HNSW index construction).
-If pre-computed embeddings exist (run `python -m benchmarks.precompute` first),
-the CPU-bound embedding step is skipped entirely so the numbers reflect only
-storage performance. Otherwise, embeddings are computed on the fly.
+Measures the Qdrant write phase only (disk I/O bound — HNSW index construction).
+Pre-computed embeddings are loaded from data/.cache/ so CPU embedding time is
+excluded and numbers reflect pure storage performance.
 
 Run:
-  python -m benchmarks.precompute           # pre-compute embeddings once
-  python -m benchmarks.ingest              # uses medium, skips embedding if cached
+  python -m benchmarks.ingest              # medium (default)
+  python -m benchmarks.ingest small
   python -m benchmarks.ingest large
 """
 
@@ -136,7 +135,7 @@ def run_ingest_benchmark() -> None:
 
     console.print()
     console.print(table)
-    console.print("\n[dim]Qdrant write is disk-I/O-bound — scales with ABS IOPS. Run python -m benchmarks.precompute first to isolate write performance from CPU embedding time.[/dim]")
+    console.print("\n[dim]Qdrant write is disk-I/O-bound — scales with ABS IOPS.[/dim]")
 
 
 if __name__ == "__main__":
