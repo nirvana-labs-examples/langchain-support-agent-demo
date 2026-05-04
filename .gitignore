@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Qdrant local storage (when running without Docker volume)
+qdrant_storage/
+
+# Dataset directories — stored as .zip files in git; extracted on first use
+data/small/
+data/medium/
+data/large/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

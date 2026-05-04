@@ -1,0 +1,38 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: qdrant
+    ports:
+      - "6333:6333"   # REST API + Web UI
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_storage:/root/.ollama
+    restart: unless-stopped
+    # GPU support (optional): uncomment if the host has an NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  qdrant_storage:
+    driver: local
+    # On Nirvana Cloud: bind this to a mounted ABS (Accelerated Block Storage) volume for
+    # 10,000+ IOPS and sub-millisecond storage latency.
+    # See infra/volume_setup.md for instructions.
+  ollama_storage:
+    driver: local
