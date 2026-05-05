@@ -16,9 +16,11 @@ Run:
 """
 
 import csv
+import json
 import random
 import statistics
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 import time
 
@@ -152,7 +154,11 @@ def _check_collection_exists() -> None:
         sys.exit(1)
 
 
-def run_retrieval_benchmark(num_queries: int) -> None:
+def run_retrieval_benchmark(
+    num_queries: int,
+    json_path: str | None = None,
+    platform: str | None = None,
+) -> None:
     console.rule(f"[bold magenta]Retrieval Latency Benchmark — dataset: {settings.dataset}[/bold magenta]")
 
     _check_collection_exists()
@@ -186,6 +192,27 @@ def run_retrieval_benchmark(num_queries: int) -> None:
     console.print(table)
     console.print("\n[dim]Latency is Qdrant HNSW search only — query embedding is done upfront and excluded from the timer. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS (Accelerated Block Storage) is most pronounced.[/dim]")
 
+    if json_path:
+        result = {
+            "platform": platform or "local",
+            "benchmark": "retrieval",
+            "dataset": settings.dataset,
+            "queries": len(latencies),
+            "search_latency_mean_ms": round(mean, 3),
+            "search_latency_p50_ms": round(p50, 3),
+            "search_latency_p95_ms": round(p95, 3),
+            "search_latency_p99_ms": round(p99, 3),
+            "search_latency_min_ms": round(min(latencies), 3),
+            "search_latency_max_ms": round(max(latencies), 3),
+            "embedding_model": settings.embedding_model,
+            "top_k": settings.retriever_top_k,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        out = Path(json_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _ = out.write_text(json.dumps(result, indent=2))
+        console.print(f"[dim]Wrote JSON results to {json_path}[/dim]")
+
 
 _DEFAULT_QUERIES = {"small": 20, "medium": 200, "large": 500}
 
@@ -196,10 +223,16 @@ if __name__ == "__main__":
         settings.dataset = dataset_args[0]  # pyright: ignore[reportAttributeAccessIssue]
 
     num_queries = _DEFAULT_QUERIES[settings.dataset]
+    json_path: str | None = None
+    platform: str | None = None
     for arg in argv:
         if arg.startswith("--queries="):
             num_queries = int(arg.split("=", 1)[1])
+        elif arg.startswith("--json="):
+            json_path = arg.split("=", 1)[1]
+        elif arg.startswith("--platform="):
+            platform = arg.split("=", 1)[1]
         elif arg.isdigit():
             num_queries = int(arg)
 
-    run_retrieval_benchmark(num_queries)
+    run_retrieval_benchmark(num_queries, json_path=json_path, platform=platform)

@@ -1,0 +1,4 @@
+---
+# Per-host platform_name overrides this in inventory/hosts.yml.
+# This file mostly exists so any aws-only settings can be added here later.
+provider: aws

@@ -1,0 +1,124 @@
+---
+# rsync the repo from the operator's machine to /opt/repo (incl. data/.cache/),
+# install Python deps via uv, run both benchmarks, fetch JSON results back.
+#
+# Variables:
+#   platform_name: per-host (e.g., gp3-3k, nirvana-abs)
+#   repo_root_local: path to repo on operator's machine (defaults to .. of inventory)
+#   dataset: which dataset to benchmark (default: medium)
+
+- name: Set defaults
+  set_fact:
+    repo_root_local: "{{ repo_root_local | default(playbook_dir + '/../..') }}"
+    dataset: "{{ dataset | default('medium') }}"
+
+- name: Ensure /opt/repo exists
+  file:
+    path: /opt/repo
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Sync repo to VM (excluding heavy/unneeded files)
+  synchronize:
+    src: "{{ repo_root_local }}/"
+    dest: /opt/repo/
+    delete: yes
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=.venv"
+      - "--exclude=__pycache__"
+      - "--exclude=.claude"
+      - "--exclude=qdrant_storage"
+      - "--exclude=results"
+      - "--exclude=infra/terraform/.terraform"
+      - "--exclude=infra/terraform/terraform.tfstate*"
+  become: false
+
+- name: Install uv
+  shell: |
+    set -e
+    if ! command -v uv >/dev/null 2>&1; then
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+    fi
+  args:
+    creates: /home/ubuntu/.local/bin/uv
+  become: false
+
+- name: Create venv and install deps
+  shell: |
+    set -e
+    export PATH=$HOME/.local/bin:$PATH
+    cd /opt/repo
+    uv venv --python 3.11
+    uv pip install -r requirements.txt
+  become: false
+  register: pip_install
+  changed_when: "'Installed' in pip_install.stdout or 'Resolved' in pip_install.stdout"
+
+# =============================================================================
+# Run benchmarks
+# =============================================================================
+
+- name: Run ingest benchmark
+  shell: |
+    set -e
+    cd /opt/repo
+    .venv/bin/python -m benchmarks.ingest {{ dataset }} \
+      --platform={{ platform_name }} \
+      --json=/opt/benchmark/ingest_{{ dataset }}.json
+  become: false
+  environment:
+    QDRANT_HOST: localhost
+  register: ingest_result
+
+- name: Populate Qdrant for retrieval benchmark (app.ingest)
+  shell: |
+    set -e
+    cd /opt/repo
+    .venv/bin/python -m app.ingest {{ dataset }} --recreate
+  become: false
+  environment:
+    QDRANT_HOST: localhost
+  register: app_ingest_result
+
+- name: Run retrieval benchmark
+  shell: |
+    set -e
+    cd /opt/repo
+    .venv/bin/python -m benchmarks.retrieval {{ dataset }} \
+      --platform={{ platform_name }} \
+      --json=/opt/benchmark/retrieval_{{ dataset }}.json
+  become: false
+  environment:
+    QDRANT_HOST: localhost
+  register: retrieval_result
+
+# =============================================================================
+# Fetch all three JSON files back to operator's machine
+# =============================================================================
+
+- name: Fetch ingest JSON
+  fetch:
+    src: /opt/benchmark/ingest_{{ dataset }}.json
+    dest: "{{ repo_root_local }}/results/{{ platform_name }}/ingest_{{ dataset }}.json"
+    flat: yes
+
+- name: Fetch retrieval JSON
+  fetch:
+    src: /opt/benchmark/retrieval_{{ dataset }}.json
+    dest: "{{ repo_root_local }}/results/{{ platform_name }}/retrieval_{{ dataset }}.json"
+    flat: yes
+
+- name: Fetch fio.json
+  fetch:
+    src: /opt/benchmark/fio.json
+    dest: "{{ repo_root_local }}/results/{{ platform_name }}/fio.json"
+    flat: yes
+
+- name: Display run summary
+  debug:
+    msg: |
+      [{{ platform_name }}] benchmarks complete.
+      Results saved to results/{{ platform_name }}/

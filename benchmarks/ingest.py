@@ -11,9 +11,12 @@ Run:
   python -m benchmarks.ingest large
 """
 
+import json
 import statistics
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -40,7 +43,7 @@ def _percentile(data: list[float], p: float) -> float:
     return sorted_data[lo] + (sorted_data[hi] - sorted_data[lo]) * (idx - lo)
 
 
-def run_ingest_benchmark() -> None:
+def run_ingest_benchmark(json_path: str | None = None, platform: str | None = None) -> None:
     dataset = settings.dataset
     console.rule(f"[bold magenta]Ingest Throughput Benchmark — dataset: {dataset}[/bold magenta]")
 
@@ -137,9 +140,43 @@ def run_ingest_benchmark() -> None:
     console.print(table)
     console.print("\n[dim]Qdrant write is disk-I/O-bound — scales with ABS IOPS.[/dim]")
 
+    if json_path:
+        result = {
+            "platform": platform or "local",
+            "benchmark": "ingest",
+            "dataset": dataset,
+            "chunks": num_chunks,
+            "qdrant_write_time_s": round(write_time, 3),
+            "write_throughput_vec_per_sec": round(write_throughput, 1),
+            "batch_latency_p50_ms": round(statistics.median(batch_latencies_ms), 2),
+            "batch_latency_p95_ms": round(_percentile(batch_latencies_ms, 95), 2),
+            "batch_latency_p99_ms": round(_percentile(batch_latencies_ms, 99), 2),
+            "write_batches": len(batch_latencies_ms),
+            "embedding_model": settings.embedding_model,
+            "vector_dimensions": settings.embedding_dimensions,
+            "embed_time_s": round(embed_time, 3) if embed_time is not None else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        out = Path(json_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _ = out.write_text(json.dumps(result, indent=2))
+        console.print(f"[dim]Wrote JSON results to {json_path}[/dim]")
+
+
+def _parse_args() -> tuple[str | None, str | None]:
+    """Returns (json_path, platform). Dataset is parsed into settings.dataset."""
+    json_path: str | None = None
+    platform: str | None = None
+    for arg in sys.argv[1:]:
+        if arg in ("small", "medium", "large"):
+            settings.dataset = arg
+        elif arg.startswith("--json="):
+            json_path = arg.split("=", 1)[1]
+        elif arg.startswith("--platform="):
+            platform = arg.split("=", 1)[1]
+    return json_path, platform
+
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a in ("small", "medium", "large")]
-    if args:
-        settings.dataset = args[0]  # pyright: ignore[reportAttributeAccessIssue]
-    run_ingest_benchmark()
+    _json_path, _platform = _parse_args()
+    run_ingest_benchmark(json_path=_json_path, platform=_platform)

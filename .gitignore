@@ -28,3 +28,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Cross-cloud benchmark outputs (gitignored — generated per run)
+results/
+
+# Generated Ansible inventory (built from `terraform output`)
+infra/ansible/inventory/hosts.yml
