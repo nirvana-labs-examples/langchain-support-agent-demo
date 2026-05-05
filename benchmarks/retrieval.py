@@ -206,6 +206,7 @@ def run_retrieval_benchmark(
             "search_latency_max_ms": round(max(latencies), 3),
             "embedding_model": settings.embedding_model,
             "top_k": settings.retriever_top_k,
+            "on_disk": settings.qdrant_on_disk,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         out = Path(json_path)

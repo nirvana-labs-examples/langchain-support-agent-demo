@@ -83,6 +83,14 @@
     QDRANT_HOST: localhost
   register: app_ingest_result
 
+- name: Drop OS page cache before retrieval benchmark
+  # With qdrant_on_disk=true, vectors and the HNSW graph are mmap'd from disk
+  # but Linux still serves reads from the page cache. After app.ingest the
+  # whole collection is hot in cache, so retrieval would measure RAM, not
+  # storage. Drop caches here to force HNSW search to read from disk.
+  become: true
+  shell: sync && echo 3 > /proc/sys/vm/drop_caches
+
 - name: Run retrieval benchmark
   shell: |
     set -e

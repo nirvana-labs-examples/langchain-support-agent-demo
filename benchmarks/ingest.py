@@ -21,7 +21,7 @@ from pathlib import Path
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, HnswConfigDiff, PointStruct, VectorParams
 from rich.console import Console
 from rich.table import Table
 
@@ -100,8 +100,14 @@ def run_ingest_benchmark(json_path: str | None = None, platform: str | None = No
         _ = client.delete_collection(BENCH_COLLECTION)
     _ = client.create_collection(
         collection_name=BENCH_COLLECTION,
-        vectors_config=VectorParams(size=settings.embedding_dimensions, distance=Distance.COSINE),
+        vectors_config=VectorParams(
+            size=settings.embedding_dimensions,
+            distance=Distance.COSINE,
+            on_disk=settings.qdrant_on_disk,
+        ),
+        hnsw_config=HnswConfigDiff(on_disk=settings.qdrant_on_disk),
     )
+    console.print(f"  [dim]Storage mode: {'on-disk (mmap)' if settings.qdrant_on_disk else 'in-memory'}[/dim]")
 
     # --- Write phase (disk I/O bound) ---
     console.print(f"\nWriting [cyan]{num_chunks}[/cyan] vectors to Qdrant (batch_size={BATCH_SIZE})...")
@@ -155,6 +161,7 @@ def run_ingest_benchmark(json_path: str | None = None, platform: str | None = No
             "embedding_model": settings.embedding_model,
             "vector_dimensions": settings.embedding_dimensions,
             "embed_time_s": round(embed_time, 3) if embed_time is not None else None,
+            "on_disk": settings.qdrant_on_disk,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         out = Path(json_path)

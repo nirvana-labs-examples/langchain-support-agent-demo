@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     qdrant_host: str = Field(default="localhost")
     qdrant_port: int = Field(default=6333)
     qdrant_collection_name: str = Field(default="support_docs")
+    # When true, create collections with vectors + HNSW graph stored on disk
+    # (mmap'd) instead of fully in RAM. Forces searches to hit the storage layer
+    # so the retrieval benchmark actually measures disk I/O at any dataset size.
+    qdrant_on_disk: bool = Field(default=True)
 
     # Embedding model (HuggingFace, runs locally)
     embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
