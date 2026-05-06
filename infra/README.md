@@ -63,8 +63,14 @@ cd infra/terraform && terraform destroy
 1. **`generate-inventory.sh`** — reads `terraform output` for each VM IP, writes `infra/ansible/inventory/hosts.yml`, and waits for SSH on all five hosts.
 2. **`ansible-playbook playbook.yml`** — applies two roles to every host in parallel:
    - **`benchmark-services`** — installs Docker + fio, runs a 4k random-read fio benchmark on the root volume (caches dropped first), starts Qdrant via `docker compose`.
-   - **`benchmark-runner`** — rsyncs the repo (incl. `data/.cache/`), installs Python deps via `uv`, runs `benchmarks.ingest <dataset>`, runs `app.ingest <dataset> --recreate` to populate Qdrant, runs `benchmarks.retrieval <dataset>`, then `fetch`es `ingest_<dataset>.json`, `retrieval_<dataset>.json`, and `fio.json` back to `results/<platform>/`. Dataset defaults to `medium`; pass via `./infra/scripts/run-all.sh large`.
-3. **`compare-results.py`** — aggregates all `results/<platform>/*.json` files into `results/comparison_<dataset>.md` (markdown tables for raw disk, ingest, and retrieval). Pass dataset as first arg (default: `medium`).
+   - **`benchmark-runner`** — rsyncs the repo (incl. `data/.cache/`), installs Python deps via `uv`, runs `benchmarks.ingest <dataset>`, runs `app.ingest <dataset> --recreate` to populate Qdrant (with `qdrant_on_disk=true` so vectors and the HNSW graph are mmap'd from the block device), then runs a **retrieval concurrency sweep** at `c=1, 4, 16, 64` — dropping the OS page cache before each iteration so storage starts cold every time. Fetches `ingest_<dataset>.json`, `retrieval_<dataset>_c<N>.json` (one per concurrency level), and `fio.json` back to `results/<platform>/`. Dataset defaults to `medium`; pass via `./infra/scripts/run-all.sh large`.
+3. **`compare-results.py`** — aggregates all `results/<platform>/*.json` files into `results/comparison_<dataset>.md` with tables for raw disk, ingest, and retrieval p50/p99/qps across the concurrency sweep. Pass dataset as first arg (default: `medium`).
+
+### Why the concurrency sweep matters
+
+Single-stream retrieval (`c=1`) issues one HNSW traversal at a time, generating only a few outstanding I/Os — far below what high-IOPS storage like ABS is built for. The platform ranking from `c=1` understates the storage advantage. At `c=16` and above, multiple traversals overlap and the page-fault stream actually saturates the block device — that's where the fio numbers translate into application-level latency differences.
+
+Override the sweep with an Ansible extra var: `ansible-playbook playbook.yml -e 'retrieval_concurrency_levels=[1,8,32]'`. Tune query count per run with `-e retrieval_queries=1000` (default 500 — high enough to give stable percentiles even at `c=64`).
 
 ## Layout
 

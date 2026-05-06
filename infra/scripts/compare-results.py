@@ -1,9 +1,9 @@
 """
 Aggregate per-platform JSON results into a markdown comparison table.
 
-Reads results/<platform>/ingest_<dataset>.json, retrieval_<dataset>.json, and
-fio.json for every platform directory under results/ and writes
-results/comparison_<dataset>.md.
+Reads results/<platform>/ingest_<dataset>.json, retrieval_<dataset>_c<N>.json
+(one per concurrency level), and fio.json for every platform directory under
+results/ and writes results/comparison_<dataset>.md.
 
 Usage: compare-results.py [dataset]   (default: medium)
 
@@ -20,6 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _RESULTS_DIR = _REPO_ROOT / "results"
 
 _PLATFORM_ORDER = ["gp3-3k", "gp3-16k", "io2-32k", "io2-64k", "nirvana-abs"]
+_CONCURRENCY_LEVELS = [1, 4, 16, 64]
 
 
 def _load(platform_dir: Path, name: str) -> dict[str, object] | None:
@@ -28,6 +29,19 @@ def _load(platform_dir: Path, name: str) -> dict[str, object] | None:
         return None
     data: dict[str, object] = json.loads(path.read_text())  # pyright: ignore[reportAny]
     return data
+
+
+def _load_retrieval(
+    platform_dir: Path, dataset: str, concurrency: int
+) -> dict[str, object] | None:
+    """Load a concurrency-tagged retrieval result, falling back to the legacy
+    untagged filename when concurrency=1 (so older single-stream runs still show)."""
+    tagged = _load(platform_dir, f"retrieval_{dataset}_c{concurrency}")
+    if tagged is not None:
+        return tagged
+    if concurrency == 1:
+        return _load(platform_dir, f"retrieval_{dataset}")
+    return None
 
 
 def _fmt(v: object, suffix: str = "") -> str:
@@ -59,8 +73,12 @@ def main() -> None:
     for platform in platforms:
         d = _RESULTS_DIR / platform
         ingest = _load(d, f"ingest_{dataset}") or {}
-        retrieval = _load(d, f"retrieval_{dataset}") or {}
         fio = _load(d, "fio") or {}
+        retrieval_by_c: dict[int, dict[str, object]] = {}
+        for c in _CONCURRENCY_LEVELS:
+            r = _load_retrieval(d, dataset, c)
+            if r is not None:
+                retrieval_by_c[c] = r
         rows.append({
             "platform": platform,
             "fio_iops": fio.get("iops"),
@@ -69,9 +87,7 @@ def main() -> None:
             "ingest_p50": ingest.get("batch_latency_p50_ms"),
             "ingest_p95": ingest.get("batch_latency_p95_ms"),
             "ingest_p99": ingest.get("batch_latency_p99_ms"),
-            "retrieval_p50": retrieval.get("search_latency_p50_ms"),
-            "retrieval_p95": retrieval.get("search_latency_p95_ms"),
-            "retrieval_p99": retrieval.get("search_latency_p99_ms"),
+            "retrieval_by_c": retrieval_by_c,
         })
 
     lines: list[str] = []
@@ -94,13 +110,40 @@ def main() -> None:
             f"| {r['platform']} | {_fmt(r['ingest_throughput'])} | {_fmt(r['ingest_p50'])} | {_fmt(r['ingest_p95'])} | {_fmt(r['ingest_p99'])} |"
         )
 
-    lines.append("\n## Retrieval latency (Qdrant HNSW search only)\n")
-    lines.append("| Platform | p50 (ms) | p95 | p99 |")
-    lines.append("|---|---:|---:|---:|")
+    # Concurrency sweep — two tables (latency, throughput) over the same runs.
+    # Each retrieval run drops the OS page cache first so storage is genuinely cold.
+    header_cells = " | ".join(f"c={c}" for c in _CONCURRENCY_LEVELS)
+    align_cells = " | ".join("---:" for _ in _CONCURRENCY_LEVELS)
+
+    def _cell(retrieval_by_c: dict[int, dict[str, object]], c: int, key: str) -> str:
+        r = retrieval_by_c.get(c)
+        if r is None:
+            return "—"
+        return _fmt(r.get(key))
+
+    lines.append("\n## Retrieval latency p50 (ms) under concurrent load\n")
+    lines.append(f"| Platform | {header_cells} |")
+    lines.append(f"|---| {align_cells} |")
     for r in rows:
-        lines.append(
-            f"| {r['platform']} | {_fmt(r['retrieval_p50'])} | {_fmt(r['retrieval_p95'])} | {_fmt(r['retrieval_p99'])} |"
-        )
+        rc = r["retrieval_by_c"] or {}
+        cells = " | ".join(_cell(rc, c, "search_latency_p50_ms") for c in _CONCURRENCY_LEVELS)  # pyright: ignore[reportArgumentType]
+        lines.append(f"| {r['platform']} | {cells} |")
+
+    lines.append("\n## Retrieval latency p99 (ms) under concurrent load\n")
+    lines.append(f"| Platform | {header_cells} |")
+    lines.append(f"|---| {align_cells} |")
+    for r in rows:
+        rc = r["retrieval_by_c"] or {}
+        cells = " | ".join(_cell(rc, c, "search_latency_p99_ms") for c in _CONCURRENCY_LEVELS)  # pyright: ignore[reportArgumentType]
+        lines.append(f"| {r['platform']} | {cells} |")
+
+    lines.append("\n## Retrieval throughput (qps) under concurrent load\n")
+    lines.append(f"| Platform | {header_cells} |")
+    lines.append(f"|---| {align_cells} |")
+    for r in rows:
+        rc = r["retrieval_by_c"] or {}
+        cells = " | ".join(_cell(rc, c, "qps") for c in _CONCURRENCY_LEVELS)  # pyright: ignore[reportArgumentType]
+        lines.append(f"| {r['platform']} | {cells} |")
 
     out = _RESULTS_DIR / f"comparison_{dataset}.md"
     _ = out.write_text("\n".join(lines) + "\n")

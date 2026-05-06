@@ -322,10 +322,27 @@ excluded — numbers reflect only Qdrant HNSW search (disk I/O).
 
 ```bash
 python -m app.ingest medium                      # one-time setup
-python -m benchmarks.retrieval                   # medium, 200 queries
+python -m benchmarks.retrieval                   # medium, 200 queries, single-stream
 python -m benchmarks.retrieval large             # 500 queries (needs app.ingest large first)
 python -m benchmarks.retrieval medium --queries=50
+python -m benchmarks.retrieval medium --concurrency=16   # 16 in-flight queries
 ```
+
+`--concurrency=N` fires queries in parallel via a thread pool and reports both
+per-query latency under load (p50/p95/p99) and throughput (qps). Single-stream
+runs hide the full storage advantage — Qdrant only generates real I/O parallelism
+when multiple HNSW traversals are in flight, which is when high-IOPS storage
+like Nirvana ABS pulls ahead. The cross-cloud sweep in `infra/` runs at
+concurrency 1, 4, 16, 64 by default.
+
+### On-disk vector storage
+
+By default the app creates collections with `on_disk=true` for both vectors
+and the HNSW graph. Qdrant memory-maps the files, so cold reads hit the block
+device and the page cache warms naturally over time — exactly the regime where
+storage latency matters. Set `QDRANT_ON_DISK=false` in `.env` to fall back to
+the legacy in-RAM mode (faster on warm cache, but a CPU/RAM benchmark, not a
+storage one).
 
 See `benchmarks/sample_results.md` for results collected on Nirvana Cloud.
 

@@ -7,11 +7,6 @@
 #   repo_root_local: path to repo on operator's machine (defaults to .. of inventory)
 #   dataset: which dataset to benchmark (default: medium)
 
-- name: Set defaults
-  set_fact:
-    repo_root_local: "{{ repo_root_local | default(playbook_dir + '/../..') }}"
-    dataset: "{{ dataset | default('medium') }}"
-
 - name: Ensure /opt/repo exists
   file:
     path: /opt/repo
@@ -51,7 +46,7 @@
     set -e
     export PATH=$HOME/.local/bin:$PATH
     cd /opt/repo
-    uv venv --python 3.11
+    uv venv --python 3.11 --allow-existing
     uv pip install -r requirements.txt
   become: false
   register: pip_install
@@ -83,25 +78,14 @@
     QDRANT_HOST: localhost
   register: app_ingest_result
 
-- name: Drop OS page cache before retrieval benchmark
-  # With qdrant_on_disk=true, vectors and the HNSW graph are mmap'd from disk
-  # but Linux still serves reads from the page cache. After app.ingest the
-  # whole collection is hot in cache, so retrieval would measure RAM, not
-  # storage. Drop caches here to force HNSW search to read from disk.
-  become: true
-  shell: sync && echo 3 > /proc/sys/vm/drop_caches
-
-- name: Run retrieval benchmark
-  shell: |
-    set -e
-    cd /opt/repo
-    .venv/bin/python -m benchmarks.retrieval {{ dataset }} \
-      --platform={{ platform_name }} \
-      --json=/opt/benchmark/retrieval_{{ dataset }}.json
-  become: false
-  environment:
-    QDRANT_HOST: localhost
-  register: retrieval_result
+- name: Run retrieval benchmark sweep (concurrency 1, 4, 16, 64)
+  # Each iteration drops the OS page cache before running so every run starts
+  # from cold storage and the comparison is fair across concurrency levels.
+  # qdrant_on_disk=true is what makes those reads actually hit the block device.
+  include_tasks: retrieval_sweep.yml
+  loop: "{{ retrieval_concurrency_levels | default([1, 4, 16, 64]) }}"
+  loop_control:
+    loop_var: concurrency
 
 # =============================================================================
 # Fetch all three JSON files back to operator's machine
@@ -113,11 +97,12 @@
     dest: "{{ repo_root_local }}/results/{{ platform_name }}/ingest_{{ dataset }}.json"
     flat: yes
 
-- name: Fetch retrieval JSON
+- name: Fetch retrieval sweep JSONs
   fetch:
-    src: /opt/benchmark/retrieval_{{ dataset }}.json
-    dest: "{{ repo_root_local }}/results/{{ platform_name }}/retrieval_{{ dataset }}.json"
+    src: /opt/benchmark/retrieval_{{ dataset }}_c{{ item }}.json
+    dest: "{{ repo_root_local }}/results/{{ platform_name }}/retrieval_{{ dataset }}_c{{ item }}.json"
     flat: yes
+  loop: "{{ retrieval_concurrency_levels | default([1, 4, 16, 64]) }}"
 
 - name: Fetch fio.json
   fetch:

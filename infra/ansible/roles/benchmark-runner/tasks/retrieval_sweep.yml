@@ -1,0 +1,20 @@
+---
+# One iteration of the retrieval-concurrency sweep. Called via include_tasks
+# from main.yml with `concurrency` set as the loop_var.
+
+- name: "Drop OS page cache before retrieval c={{ concurrency }}"
+  become: true
+  shell: sync && echo 3 > /proc/sys/vm/drop_caches
+
+- name: "Retrieval benchmark @ concurrency={{ concurrency }}"
+  shell: |
+    set -e
+    cd /opt/repo
+    .venv/bin/python -m benchmarks.retrieval {{ dataset }} \
+      --concurrency={{ concurrency }} \
+      --queries={{ retrieval_queries | default(500) }} \
+      --platform={{ platform_name }} \
+      --json=/opt/benchmark/retrieval_{{ dataset }}_c{{ concurrency }}.json
+  become: false
+  environment:
+    QDRANT_HOST: localhost
