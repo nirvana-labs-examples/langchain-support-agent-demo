@@ -1,0 +1,132 @@
+---
+# Provision Docker, run fio cold-read benchmark, start Qdrant.
+# fio runs *before* Qdrant takes over the disk, so the OS cache is clean
+# and we measure raw read IOPS on whatever EBS/ABS volume is mounted as root.
+
+- name: Install non-Docker apt packages
+  apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - rsync
+      - fio
+      - curl
+    state: present
+    update_cache: true
+
+# Stock Ubuntu doesn't ship docker-compose-plugin; use Docker's official script
+# which installs both Engine and Compose plugin from Docker's apt repo.
+- name: Check if docker is already installed
+  command: docker --version
+  register: docker_check
+  failed_when: false
+  changed_when: false
+
+- name: Install Docker via official script
+  shell: curl -fsSL https://get.docker.com | sh
+  when: docker_check.rc != 0
+
+- name: Wait for connection to recover
+  wait_for_connection:
+    delay: 5
+    timeout: 60
+
+- name: Start Docker service
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+# =============================================================================
+# RAW DISK COLD READ (fio) — runs before Qdrant uses the volume
+# =============================================================================
+
+- name: Create benchmark working directory (writable by ubuntu)
+  file:
+    path: /opt/benchmark
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Pre-write fio test file (1 GB on root volume)
+  shell: |
+    fio --name=write_test \
+        --ioengine=libaio \
+        --direct=1 \
+        --bs=4k \
+        --iodepth=64 \
+        --size=1G \
+        --rw=write \
+        --numjobs=4 \
+        --filename=/opt/benchmark/cold_read_test \
+        --output-format=normal > /dev/null
+
+- name: Drop OS caches before cold read
+  shell: sync && echo 3 > /proc/sys/vm/drop_caches
+
+- name: Run fio cold-read benchmark (4k random read, 30s)
+  shell: |
+    fio --name=cold_read \
+        --ioengine=libaio \
+        --direct=1 \
+        --bs=4k \
+        --iodepth=64 \
+        --size=1G \
+        --rw=randread \
+        --numjobs=4 \
+        --runtime=30 \
+        --time_based \
+        --group_reporting \
+        --output-format=json \
+        --filename=/opt/benchmark/cold_read_test
+  register: fio_result
+
+- name: Parse fio results
+  set_fact:
+    fio_iops: "{{ (fio_result.stdout | from_json).jobs[0].read.iops | round(0) | int }}"
+    fio_latency_us: "{{ ((fio_result.stdout | from_json).jobs[0].read.lat_ns.mean / 1000) | round(2) }}"
+
+- name: Save fio results to JSON
+  copy:
+    content: |
+      {
+        "platform": "{{ platform_name }}",
+        "benchmark": "fio",
+        "iops": {{ fio_iops }},
+        "latency_us": {{ fio_latency_us }},
+        "test": "4k randread, iodepth=64, numjobs=4, 30s, direct=1"
+      }
+    dest: /opt/benchmark/fio.json
+    mode: '0644'
+
+- name: Cleanup fio test file
+  file:
+    path: /opt/benchmark/cold_read_test
+    state: absent
+
+- name: Display fio results
+  debug:
+    msg: "[{{ platform_name }}] fio: {{ fio_iops }} IOPS, {{ fio_latency_us }} us latency"
+
+# =============================================================================
+# QDRANT — Docker compose with named volume on root device
+# =============================================================================
+
+- name: Render docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/benchmark/docker-compose.yml
+    mode: '0644'
+
+- name: Start Qdrant
+  command: docker compose up -d
+  args:
+    chdir: /opt/benchmark
+
+- name: Wait for Qdrant REST port
+  wait_for:
+    port: 6333
+    delay: 3
+    timeout: 60

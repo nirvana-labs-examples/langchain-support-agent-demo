@@ -1,0 +1,9 @@
+---
+- name: Provision benchmark VMs and run benchmarks
+  hosts: all
+  become: true
+  gather_facts: true
+  any_errors_fatal: false
+  roles:
+    - benchmark-services
+    - benchmark-runner

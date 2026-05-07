@@ -1,0 +1,4 @@
+---
+# Defaults so vars are defined even when --start-at-task skips the set_fact step.
+dataset: medium
+repo_root_local: "{{ playbook_dir }}/../.."

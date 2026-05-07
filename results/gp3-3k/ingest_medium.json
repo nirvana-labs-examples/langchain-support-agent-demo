@@ -1,0 +1,17 @@
+{
+  "platform": "gp3-3k",
+  "benchmark": "ingest",
+  "dataset": "medium",
+  "chunks": 46255,
+  "qdrant_write_time_s": 5.579,
+  "write_throughput_vec_per_sec": 8291.1,
+  "batch_latency_p50_ms": 61.11,
+  "batch_latency_p95_ms": 67.19,
+  "batch_latency_p99_ms": 81.45,
+  "write_batches": 91,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "vector_dimensions": 384,
+  "embed_time_s": null,
+  "on_disk": true,
+  "timestamp": "2026-05-07T02:18:59.108216+00:00"
+}

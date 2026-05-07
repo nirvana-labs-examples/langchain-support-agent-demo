@@ -1,0 +1,7 @@
+{
+  "platform": "nirvana-abs",
+  "benchmark": "fio",
+  "iops": 105762,
+  "latency_us": 2420.02,
+  "test": "4k randread, iodepth=64, numjobs=4, 30s, direct=1"
+}

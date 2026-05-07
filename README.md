@@ -322,12 +322,33 @@ excluded — numbers reflect only Qdrant HNSW search (disk I/O).
 
 ```bash
 python -m app.ingest medium                      # one-time setup
-python -m benchmarks.retrieval                   # medium, 200 queries
+python -m benchmarks.retrieval                   # medium, 200 queries, single-stream
 python -m benchmarks.retrieval large             # 500 queries (needs app.ingest large first)
 python -m benchmarks.retrieval medium --queries=50
+python -m benchmarks.retrieval medium --concurrency=16   # 16 in-flight queries
 ```
 
-See `benchmarks/sample_results.md` for results collected on Nirvana Cloud.
+`--concurrency=N` fires queries in parallel via a thread pool and reports both
+per-query latency under load (p50/p95/p99) and throughput (qps). Single-stream
+runs hide the full storage advantage — Qdrant only generates real I/O parallelism
+when multiple HNSW traversals are in flight, which is when high-IOPS storage
+like Nirvana ABS pulls ahead. The cross-cloud sweep in `infra/` runs at
+concurrency 1, 4, 16, 64 by default.
+
+### On-disk vector storage
+
+By default the app creates collections with `on_disk=true` for both vectors
+and the HNSW graph. Qdrant memory-maps the files, so cold reads hit the block
+device and the page cache warms naturally over time — exactly the regime where
+storage latency matters. Set `QDRANT_ON_DISK=false` in `.env` to fall back to
+the legacy in-RAM mode (faster on warm cache, but a CPU/RAM benchmark, not a
+storage one).
+
+See `benchmarks/methodology.md` for an explanation of the design choices —
+why both benchmarks isolate storage I/O from CPU, what `on_disk=true` does,
+why the page cache is dropped before each retrieval run, and why the
+concurrency sweep matters. See `results/comparison_medium.md` for the latest
+cross-cloud numbers (AWS gp3/io2 vs Nirvana ABS).
 
 Both benchmarks run **entirely on the host** — no external API calls. The
 numbers reflect Nirvana's storage performance directly.
@@ -374,8 +395,11 @@ langchain-support-agent-demo/
   benchmarks/
     precompute.py        ← embed dataset once and save to data/.cache/
     ingest.py            ← Qdrant write throughput (uses data/.cache/)
-    retrieval.py         ← p50/p95/p99 retrieval latency
-    sample_results.md    ← results from Nirvana Cloud
+    retrieval.py         ← retrieval latency + qps under concurrency
+    methodology.md       ← what these benchmarks measure (and what they don't)
+
+  results/               ← cross-cloud comparison output (gitignored except comparison_*.md)
+    comparison_medium.md ← AWS gp3/io2 vs Nirvana ABS, latest run
 ```
 
 ---

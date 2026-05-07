@@ -14,7 +14,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, HnswConfigDiff, PointStruct, VectorParams
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
@@ -121,9 +121,12 @@ def ensure_collection(client: QdrantClient, collection_name: str) -> None:
             vectors_config=VectorParams(
                 size=settings.embedding_dimensions,
                 distance=Distance.COSINE,
+                on_disk=settings.qdrant_on_disk,
             ),
+            hnsw_config=HnswConfigDiff(on_disk=settings.qdrant_on_disk),
         )
-        console.print(f"  [yellow]Created collection[/yellow] '{collection_name}'")
+        mode = "on-disk" if settings.qdrant_on_disk else "in-memory"
+        console.print(f"  [yellow]Created collection[/yellow] '{collection_name}' ([cyan]{mode}[/cyan])")
     else:
         console.print(f"  [blue]Collection[/blue] '{collection_name}' already exists")
 

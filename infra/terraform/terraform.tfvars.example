@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars (gitignored) OR export as TF_VAR_* env vars.
+#
+# Required:
+ssh_public_key     = "ssh-ed25519 AAAA... your-comment"
+nirvana_project_id = "prj_..."
+
+# Optional overrides (defaults in variables.tf):
+# aws_region            = "us-west-1"
+# nirvana_region        = "us-sva-2"
+# aws_instance_type     = "m6i.xlarge"
+# nirvana_instance_type = "n1-standard-4"

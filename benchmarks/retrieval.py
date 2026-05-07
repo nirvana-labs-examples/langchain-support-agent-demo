@@ -16,9 +16,12 @@ Run:
 """
 
 import csv
+import json
 import random
 import statistics
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 import time
 
@@ -128,19 +131,37 @@ def embed_queries(queries: list[str]) -> list[list[float]]:
     return vectors
 
 
-def measure_latencies(query_vectors: list[list[float]]) -> list[float]:
+def measure_latencies(
+    query_vectors: list[list[float]], concurrency: int = 1
+) -> tuple[list[float], float]:
+    """Returns (per_query_latencies_ms, total_wall_time_s).
+
+    With concurrency > 1, queries are issued in parallel via a thread pool and
+    each worker records its own wall time. The single shared QdrantClient is
+    safe to use across threads (httpx connection pool). The wall time spans
+    submission of the first query to completion of the last.
+    """
     client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
     collection = f"{settings.qdrant_collection_name}_{settings.dataset}"
-    latencies: list[float] = []
 
-    console.print(f"\nRunning [cyan]{len(query_vectors)}[/cyan] vector searches (Qdrant only, embedding excluded)...")
-    for vec in query_vectors:
+    def run_one(vec: list[float]) -> float:
         t0 = time.perf_counter()
         _ = client.search(collection_name=collection, query_vector=vec, limit=settings.retriever_top_k)
-        latencies.append((time.perf_counter() - t0) * 1000)
-    console.print("  Done.")
+        return (time.perf_counter() - t0) * 1000
 
-    return latencies
+    console.print(
+        f"\nRunning [cyan]{len(query_vectors)}[/cyan] vector searches ([cyan]concurrency={concurrency}[/cyan], embedding excluded)..."
+    )
+    t_wall = time.perf_counter()
+    if concurrency == 1:
+        latencies = [run_one(v) for v in query_vectors]
+    else:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            latencies = list(pool.map(run_one, query_vectors))
+    wall_time = time.perf_counter() - t_wall
+    console.print(f"  Done. Wall time: [green]{wall_time:.2f}s[/green]")
+
+    return latencies, wall_time
 
 
 def _check_collection_exists() -> None:
@@ -152,7 +173,12 @@ def _check_collection_exists() -> None:
         sys.exit(1)
 
 
-def run_retrieval_benchmark(num_queries: int) -> None:
+def run_retrieval_benchmark(
+    num_queries: int,
+    json_path: str | None = None,
+    platform: str | None = None,
+    concurrency: int = 1,
+) -> None:
     console.rule(f"[bold magenta]Retrieval Latency Benchmark — dataset: {settings.dataset}[/bold magenta]")
 
     _check_collection_exists()
@@ -161,17 +187,21 @@ def run_retrieval_benchmark(num_queries: int) -> None:
     queries = _build_query_list(num_queries)
 
     query_vectors = embed_queries(queries)
-    latencies = measure_latencies(query_vectors)
+    latencies, wall_time = measure_latencies(query_vectors, concurrency=concurrency)
 
     p50 = statistics.median(latencies)
     p95 = percentile(latencies, 95)
     p99 = percentile(latencies, 99)
     mean = statistics.mean(latencies)
+    qps = len(latencies) / wall_time if wall_time > 0 else 0.0
 
     table = Table(title="Retrieval Latency Results", show_header=True)
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
     table.add_row("Queries run", str(len(latencies)))
+    table.add_row("Concurrency", str(concurrency))
+    table.add_row("Wall time", f"{wall_time:.2f} s")
+    table.add_row("Throughput", f"{qps:.1f} qps")
     table.add_row("Mean", f"{mean:.1f} ms")
     table.add_row("p50", f"{p50:.1f} ms")
     table.add_row("p95", f"{p95:.1f} ms")
@@ -184,7 +214,34 @@ def run_retrieval_benchmark(num_queries: int) -> None:
 
     console.print()
     console.print(table)
-    console.print("\n[dim]Latency is Qdrant HNSW search only — query embedding is done upfront and excluded from the timer. At 1M+ vectors the HNSW index no longer fits fully in RAM and storage latency becomes the dominant factor — where Nirvana ABS (Accelerated Block Storage) is most pronounced.[/dim]")
+    console.print(
+        "\n[dim]Latency is Qdrant HNSW search only — query embedding is done upfront and excluded from the timer. At concurrency > 1, latency reflects per-query wall time *under load* (other queries in flight). Throughput (qps) is total queries / wall time.[/dim]"
+    )
+
+    if json_path:
+        result = {
+            "platform": platform or "local",
+            "benchmark": "retrieval",
+            "dataset": settings.dataset,
+            "queries": len(latencies),
+            "concurrency": concurrency,
+            "wall_time_s": round(wall_time, 3),
+            "qps": round(qps, 2),
+            "search_latency_mean_ms": round(mean, 3),
+            "search_latency_p50_ms": round(p50, 3),
+            "search_latency_p95_ms": round(p95, 3),
+            "search_latency_p99_ms": round(p99, 3),
+            "search_latency_min_ms": round(min(latencies), 3),
+            "search_latency_max_ms": round(max(latencies), 3),
+            "embedding_model": settings.embedding_model,
+            "top_k": settings.retriever_top_k,
+            "on_disk": settings.qdrant_on_disk,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        out = Path(json_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _ = out.write_text(json.dumps(result, indent=2))
+        console.print(f"[dim]Wrote JSON results to {json_path}[/dim]")
 
 
 _DEFAULT_QUERIES = {"small": 20, "medium": 200, "large": 500}
@@ -196,10 +253,21 @@ if __name__ == "__main__":
         settings.dataset = dataset_args[0]  # pyright: ignore[reportAttributeAccessIssue]
 
     num_queries = _DEFAULT_QUERIES[settings.dataset]
+    json_path: str | None = None
+    platform: str | None = None
+    concurrency = 1
     for arg in argv:
         if arg.startswith("--queries="):
             num_queries = int(arg.split("=", 1)[1])
+        elif arg.startswith("--json="):
+            json_path = arg.split("=", 1)[1]
+        elif arg.startswith("--platform="):
+            platform = arg.split("=", 1)[1]
+        elif arg.startswith("--concurrency="):
+            concurrency = int(arg.split("=", 1)[1])
         elif arg.isdigit():
             num_queries = int(arg)
 
-    run_retrieval_benchmark(num_queries)
+    run_retrieval_benchmark(
+        num_queries, json_path=json_path, platform=platform, concurrency=concurrency
+    )

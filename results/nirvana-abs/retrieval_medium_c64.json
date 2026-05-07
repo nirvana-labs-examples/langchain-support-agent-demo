@@ -1,0 +1,19 @@
+{
+  "platform": "nirvana-abs",
+  "benchmark": "retrieval",
+  "dataset": "medium",
+  "queries": 500,
+  "concurrency": 64,
+  "wall_time_s": 0.996,
+  "qps": 502.12,
+  "search_latency_mean_ms": 109.846,
+  "search_latency_p50_ms": 96.235,
+  "search_latency_p95_ms": 226.616,
+  "search_latency_p99_ms": 276.623,
+  "search_latency_min_ms": 10.677,
+  "search_latency_max_ms": 336.643,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "top_k": 5,
+  "on_disk": true,
+  "timestamp": "2026-05-06T00:39:33.460933+00:00"
+}
