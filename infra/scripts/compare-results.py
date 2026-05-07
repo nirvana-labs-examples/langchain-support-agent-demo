@@ -129,6 +129,14 @@ def main() -> None:
         cells = " | ".join(_cell(rc, c, "search_latency_p50_ms") for c in _CONCURRENCY_LEVELS)  # pyright: ignore[reportArgumentType]
         lines.append(f"| {r['platform']} | {cells} |")
 
+    lines.append("\n## Retrieval latency p95 (ms) under concurrent load\n")
+    lines.append(f"| Platform | {header_cells} |")
+    lines.append(f"|---| {align_cells} |")
+    for r in rows:
+        rc = r["retrieval_by_c"] or {}
+        cells = " | ".join(_cell(rc, c, "search_latency_p95_ms") for c in _CONCURRENCY_LEVELS)  # pyright: ignore[reportArgumentType]
+        lines.append(f"| {r['platform']} | {cells} |")
+
     lines.append("\n## Retrieval latency p99 (ms) under concurrent load\n")
     lines.append(f"| Platform | {header_cells} |")
     lines.append(f"|---| {align_cells} |")

@@ -1,0 +1,7 @@
+{
+  "platform": "gp3-16k",
+  "benchmark": "fio",
+  "iops": 16532,
+  "latency_us": 15482.94,
+  "test": "4k randread, iodepth=64, numjobs=4, 30s, direct=1"
+}

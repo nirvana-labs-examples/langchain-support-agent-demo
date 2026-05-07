@@ -29,9 +29,6 @@ Thumbs.db
 # Logs
 *.log
 
-# Cross-cloud benchmark outputs (gitignored — generated per run)
-results/
-
 # Claude Code scratch state (lock files, worktrees, etc.)
 .claude/
 

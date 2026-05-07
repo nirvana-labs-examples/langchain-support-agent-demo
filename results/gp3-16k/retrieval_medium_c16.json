@@ -1,0 +1,19 @@
+{
+  "platform": "gp3-16k",
+  "benchmark": "retrieval",
+  "dataset": "medium",
+  "queries": 500,
+  "concurrency": 16,
+  "wall_time_s": 1.497,
+  "qps": 333.97,
+  "search_latency_mean_ms": 46.504,
+  "search_latency_p50_ms": 47.18,
+  "search_latency_p95_ms": 49.697,
+  "search_latency_p99_ms": 50.914,
+  "search_latency_min_ms": 15.766,
+  "search_latency_max_ms": 52.812,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "top_k": 5,
+  "on_disk": true,
+  "timestamp": "2026-05-07T02:20:26.728424+00:00"
+}

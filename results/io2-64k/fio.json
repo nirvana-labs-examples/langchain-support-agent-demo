@@ -1,0 +1,7 @@
+{
+  "platform": "io2-64k",
+  "benchmark": "fio",
+  "iops": 40342,
+  "latency_us": 6344.66,
+  "test": "4k randread, iodepth=64, numjobs=4, 30s, direct=1"
+}
