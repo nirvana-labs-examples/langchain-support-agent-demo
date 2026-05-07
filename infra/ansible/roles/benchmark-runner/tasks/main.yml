@@ -29,6 +29,12 @@
       - "--exclude=results"
       - "--exclude=infra/terraform/.terraform"
       - "--exclude=infra/terraform/terraform.tfstate*"
+      # Only ship the active dataset's precomputed embedding cache (other
+      # datasets' caches are 100s of MB each — pure dead weight on the wire).
+      - "--include=data/.cache/{{ dataset }}_*"
+      - "--exclude=data/.cache/small_*"
+      - "--exclude=data/.cache/medium_*"
+      - "--exclude=data/.cache/large_*"
   become: false
 
 - name: Install uv
@@ -66,6 +72,9 @@
   become: false
   environment:
     QDRANT_HOST: localhost
+    # Xet (HF's content-addressed transfer) hangs on fresh AWS VMs — fall back
+    # to the standard HTTP path. Plain curl downloads the same file in ~1s.
+    HF_HUB_DISABLE_XET: "1"
   register: ingest_result
 
 - name: Populate Qdrant for retrieval benchmark (app.ingest)
@@ -76,6 +85,7 @@
   become: false
   environment:
     QDRANT_HOST: localhost
+    HF_HUB_DISABLE_XET: "1"
   register: app_ingest_result
 
 - name: Run retrieval benchmark sweep (concurrency 1, 4, 16, 64)

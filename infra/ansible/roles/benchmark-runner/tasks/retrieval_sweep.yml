@@ -18,3 +18,4 @@
   become: false
   environment:
     QDRANT_HOST: localhost
+    HF_HUB_DISABLE_XET: "1"

@@ -344,7 +344,11 @@ storage latency matters. Set `QDRANT_ON_DISK=false` in `.env` to fall back to
 the legacy in-RAM mode (faster on warm cache, but a CPU/RAM benchmark, not a
 storage one).
 
-See `benchmarks/sample_results.md` for results collected on Nirvana Cloud.
+See `benchmarks/methodology.md` for an explanation of the design choices —
+why both benchmarks isolate storage I/O from CPU, what `on_disk=true` does,
+why the page cache is dropped before each retrieval run, and why the
+concurrency sweep matters. See `results/comparison_medium.md` for the latest
+cross-cloud numbers (AWS gp3/io2 vs Nirvana ABS).
 
 Both benchmarks run **entirely on the host** — no external API calls. The
 numbers reflect Nirvana's storage performance directly.
@@ -391,8 +395,11 @@ langchain-support-agent-demo/
   benchmarks/
     precompute.py        ← embed dataset once and save to data/.cache/
     ingest.py            ← Qdrant write throughput (uses data/.cache/)
-    retrieval.py         ← p50/p95/p99 retrieval latency
-    sample_results.md    ← results from Nirvana Cloud
+    retrieval.py         ← retrieval latency + qps under concurrency
+    methodology.md       ← what these benchmarks measure (and what they don't)
+
+  results/               ← cross-cloud comparison output (gitignored except comparison_*.md)
+    comparison_medium.md ← AWS gp3/io2 vs Nirvana ABS, latest run
 ```
 
 ---
